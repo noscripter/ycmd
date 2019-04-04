@@ -28,14 +28,14 @@ Key goals:
 1. Support Java in ycmd and YCM; make it good enough to replace eclim and
    javacomplete2 for most people
 2. Make it possible/easy to support other [lsp][] servers in future (but, don't
-   suffer from yagni); prove that this works.
+   suffer from YAGNI); prove that this works.
 
 An overview of the objects involved can be seen on [this
 card][design]. In short:
 
 * 2 classes implement the language server protocol in the
   `language_server_completer.py` module:
- * `LanguageServerConnection` - an abstraction of the comminication with the
+ * `LanguageServerConnection` - an abstraction of the communication with the
    server, which may be over stdio or any number of TCP/IP ports (or a domain
    socket, etc.). Only a single implementation is included (stdio), but
    [implementations for TCP/IP](https://github.com/puremourning/ycmd-1/commit/f3cd06245692b05031a64745054326273d52d12f)
@@ -58,7 +58,7 @@ so we cannot rely on their being a `bottle` thread executing a client request.
 
 So we need a message pump and despatch thread. This is actually the
 `LanguageServerConnection`, which implements `thread`. It's main method simply
-listens on the socket/stream and despatches complete messages to the
+listens on the socket/stream and dispatches complete messages to the
 `LanguageServerCompleter`. It does this:
 
 * For `requests`: similarly to the TypeScript completer, using python `event`
@@ -207,7 +207,7 @@ dodge and weave so that we don't crash.
 Much like the initialisation sequence, the LSP shutdown sequence is a bit
 fiddly. 2 things are required:
 
-1. A `shutdown` request-reply. The server tides up and _prepares to die!_
+1. A `shutdown` request-reply. The server tidies up and _prepares to die!_
 2. An `exit` notification. We tell the server to die.
 
 This isn't so bad, but jdt.ls is buggy and actually dies without responding to
