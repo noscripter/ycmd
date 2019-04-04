@@ -1,47 +1,96 @@
-#!/usr/bin/env python
+# Copyright (C) 2011-2018 ycmd contributors
 #
-# Copyright (C) 2011, 2012, 2013  Google Inc.
+# This file is part of ycmd.
 #
-# This file is part of YouCompleteMe.
-#
-# YouCompleteMe is free software: you can redistribute it and/or modify
+# ycmd is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# YouCompleteMe is distributed in the hope that it will be useful,
+# ycmd is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+# along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
 
 import abc
 import threading
-from ycmd.utils import ToUtf8IfNeeded, ForceSemanticCompletion, RunningInsideVim
-
-if RunningInsideVim():
-  from ycm_client_support import FilterAndSortCandidates
-else:
-  from ycm_core import FilterAndSortCandidates
-
 from ycmd.completers import completer_utils
 from ycmd.responses import NoDiagnosticSupport
+from future.utils import with_metaclass
 
 NO_USER_COMMANDS = 'This completer does not define any commands.'
 
-class Completer( object ):
+# Number of seconds to block before returning True in PollForMessages
+MESSAGE_POLL_TIMEOUT = 10
+
+
+class Completer( with_metaclass( abc.ABCMeta, object ) ):
   """A base class for all Completers in YCM.
 
   Here's several important things you need to know if you're writing a custom
   Completer. The following are functions that the Vim part of YCM will be
   calling on your Completer:
 
+  *Important note about unicode and byte offsets*
+
+    Useful background: http://utf8everywhere.org
+
+    Internally, all Python strings are unicode string objects, unless otherwise
+    converted to 'bytes' using ToBytes. In particular, the line_value and
+    file_data.contents entries in the request_data are unicode strings.
+
+    However, offsets in the API (such as column_num and start_column) are *byte*
+    offsets into a utf-8 encoded version of the contents of the line or buffer.
+    Therefore it is *never* safe to perform 'character' arithmetic
+    (such as '-1' to get the previous 'character') using these byte offsets, and
+    they cannot *ever* be used to index into line_value or buffer contents
+    unicode strings.
+
+    It is therefore important to ensure that you use the right type of offsets
+    for the right type of calculation:
+     - use codepoint offsets and a unicode string for 'character' calculations
+     - use byte offsets and utf-8 encoded bytes for all other manipulations
+
+    ycmd provides the following ways of accessing the source data and offsets:
+
+    For working with utf-8 encoded bytes:
+     - request_data[ 'line_bytes' ] - the line as utf-8 encoded bytes.
+     - request_data[ 'start_column' ] and request_data[ 'column_num' ].
+
+    For working with 'character' manipulations (unicode strings and codepoint
+    offsets):
+     - request_data[ 'line_value' ] - the line as a unicode string.
+     - request_data[ 'start_codepoint' ] and request_data[ 'column_codepoint' ].
+
+    For converting between the two:
+     - utils.ToBytes
+     - utils.ByteOffsetToCodepointOffset
+     - utils.ToUnicode
+     - utils.CodepointOffsetToByteOffset
+
+    Note: The above use of codepoints for 'character' manipulations is not
+    strictly correct. There are unicode 'characters' which consume multiple
+    codepoints. However, it is currently considered viable to use a single
+    codepoint = a single character until such a time as we improve support for
+    unicode identifiers. The purpose of the above rule is to prevent crashes and
+    random encoding exceptions, not to fully support unicode identifiers.
+
+  *END: Important note about unicode and byte offsets*
+
   ShouldUseNow() is called with the start column of where a potential completion
   string should start and the current line (string) the cursor is on. For
   instance, if the user's input is 'foo.bar' and the cursor is on the 'r' in
-  'bar', start_column will be the 1-based index of 'b' in the line. Your
+  'bar', start_column will be the 1-based byte index of 'b' in the line. Your
   implementation of ShouldUseNow() should return True if your semantic completer
   should be used and False otherwise.
 
@@ -72,7 +121,11 @@ class Completer( object ):
   ycmd.responses.BuildCompletionData to build the detailed response. See
   clang_completer.py to see how its used in practice.
 
-  Again, you probably want to override ComputeCandidatesInner().
+  Again, you probably want to override ComputeCandidatesInner(). If computing
+  the fields of the candidates is costly, you should consider building only the
+  "insertion_text" field in ComputeCandidatesInner() then fill the remaining
+  fields in DetailCandidates() which is called after the filtering is done. See
+  python_completer.py for an example.
 
   You also need to implement the SupportedFiletypes() function which should
   return a list of strings, where the strings are Vim filetypes your completer
@@ -98,25 +151,37 @@ class Completer( object ):
   Override the Shutdown() member function if your Completer subclass needs to do
   custom cleanup logic on server shutdown.
 
-  If your completer uses an external server process, then it can be useful to
-  implement the ServerIsReady member function to handle the /ready request. This
-  is very useful for the test suite."""
+  If the completer server provides unsolicited messages, such as used in
+  Language Server Protocol, then you can override the PollForMessagesInner
+  method. This method is called by the client in the "long poll" fashion to
+  receive unsolicited messages. The method should block until a message is
+  available and return a message response when one becomes available, or True if
+  no message becomes available before the timeout. The return value must be one
+  of the following:
+   - a list of messages to send to the client
+   - True if a timeout occurred, and the poll should be restarted
+   - False if an error occurred, and no further polling should be attempted
 
-  __metaclass__ = abc.ABCMeta
+  If your completer uses an external server process, then it can be useful to
+  implement the ServerIsHealthy member function to handle the /healthy request.
+  This is very useful for the test suite.
+
+  If your server is based on the Language Server Protocol (LSP), take a look at
+  language_server/language_server_completer, which provides most of the work
+  necessary to get a LSP-based completion engine up and running."""
 
   def __init__( self, user_options ):
     self.user_options = user_options
     self.min_num_chars = user_options[ 'min_num_of_chars_for_completion' ]
+    self.max_diagnostics_to_display = user_options[
+        'max_diagnostics_to_display' ]
     self.prepared_triggers = (
         completer_utils.PreparedTriggers(
             user_trigger_map = user_options[ 'semantic_triggers' ],
             filetype_set = set( self.SupportedFiletypes() ) )
         if user_options[ 'auto_trigger' ] else None )
     self._completions_cache = CompletionsCache()
-
-
-  def CompletionType( self, request_data ):
-    return 0
+    self._max_candidates = user_options[ 'max_num_candidates' ]
 
 
   # It's highly likely you DON'T want to override this function but the *Inner
@@ -130,9 +195,7 @@ class Completer( object ):
     # call because we have to ensure a different thread doesn't change the cache
     # data.
     cache_completions = self._completions_cache.GetCompletionsIfCacheValid(
-        request_data[ 'line_num' ],
-        request_data[ 'start_column' ],
-        self.CompletionType( request_data ) )
+      request_data )
 
     # If None, then the cache isn't valid and we know we should return true
     if cache_completions is None:
@@ -146,56 +209,64 @@ class Completer( object ):
     if not self.prepared_triggers:
       return False
     current_line = request_data[ 'line_value' ]
-    start_column = request_data[ 'start_column' ] - 1
+    start_codepoint = request_data[ 'start_codepoint' ] - 1
+    column_codepoint = request_data[ 'column_codepoint' ] - 1
     filetype = self._CurrentFiletype( request_data[ 'filetypes' ] )
 
     return self.prepared_triggers.MatchesForFiletype(
-        current_line, start_column, filetype )
+        current_line, start_codepoint, column_codepoint, filetype )
 
 
   def QueryLengthAboveMinThreshold( self, request_data ):
-    query_length = request_data[ 'column_num' ] - request_data[ 'start_column' ]
+    # Note: calculation in 'characters' not bytes.
+    query_length = ( request_data[ 'column_codepoint' ] -
+                     request_data[ 'start_codepoint' ] )
+
     return query_length >= self.min_num_chars
 
 
   # It's highly likely you DON'T want to override this function but the *Inner
   # version of it.
   def ComputeCandidates( self, request_data ):
-    if ( not ForceSemanticCompletion( request_data ) and
+    if ( not request_data[ 'force_semantic' ] and
          not self.ShouldUseNow( request_data ) ):
       return []
 
     candidates = self._GetCandidatesFromSubclass( request_data )
-    if request_data[ 'query' ]:
-      candidates = self.FilterAndSortCandidates( candidates,
-                                                 request_data[ 'query' ] )
-    return candidates
+    candidates = self.FilterAndSortCandidates( candidates,
+                                               request_data[ 'query' ] )
+    return self.DetailCandidates( request_data, candidates )
 
 
   def _GetCandidatesFromSubclass( self, request_data ):
     cache_completions = self._completions_cache.GetCompletionsIfCacheValid(
-          request_data[ 'line_num' ],
-          request_data[ 'start_column' ],
-          self.CompletionType( request_data ) )
+      request_data )
 
     if cache_completions:
       return cache_completions
-    else:
-      raw_completions = self.ComputeCandidatesInner( request_data )
-      self._completions_cache.Update(
-          request_data[ 'line_num' ],
-          request_data[ 'start_column' ],
-          self.CompletionType( request_data ),
-          raw_completions )
-      return raw_completions
+
+    raw_completions = self.ComputeCandidatesInner( request_data )
+    self._completions_cache.Update( request_data, raw_completions )
+    return raw_completions
+
+
+  def DetailCandidates( self, request_data, candidates ):
+    return candidates
 
 
   def ComputeCandidatesInner( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def DefinedSubcommands( self ):
-    return sorted( self.GetSubcommandsMap().keys() )
+    subcommands = sorted( self.GetSubcommandsMap().keys() )
+    try:
+      # We don't want expose this subcommand because it is not really needed
+      # for the user but it is useful in tests for tearing down the server
+      subcommands.remove( 'StopServer' )
+    except ValueError:
+      pass
+    return subcommands
 
 
   def GetSubcommandsMap( self ):
@@ -231,36 +302,38 @@ class Completer( object ):
 
     # We need to handle both an omni_completer style completer and a server
     # style completer
-    if 'words' in candidates:
+    if isinstance( candidates, dict ) and 'words' in candidates:
       candidates = candidates[ 'words' ]
 
     sort_property = ''
-    if 'word' in candidates[ 0 ]:
-      sort_property = 'word'
-    elif 'insertion_text' in candidates[ 0 ]:
-      sort_property = 'insertion_text'
+    if isinstance( candidates[ 0 ], dict ):
+      if 'word' in candidates[ 0 ]:
+        sort_property = 'word'
+      elif 'insertion_text' in candidates[ 0 ]:
+        sort_property = 'insertion_text'
 
-    matches = FilterAndSortCandidates( candidates,
-                                       sort_property,
-                                       ToUtf8IfNeeded( query ) )
+    return self.FilterAndSortCandidatesInner( candidates, sort_property, query )
 
-    return matches
+
+  def FilterAndSortCandidatesInner( self, candidates, sort_property, query ):
+    return completer_utils.FilterAndSortCandidatesWrap(
+      candidates, sort_property, query, self._max_candidates )
 
 
   def OnFileReadyToParse( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnBufferVisit( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnBufferUnload( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnInsertLeave( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnUserCommand( self, arguments, request_data ):
@@ -278,7 +351,7 @@ class Completer( object ):
 
 
   def OnCurrentIdentifierFinished( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def GetDiagnosticsForCurrentFile( self, request_data ):
@@ -296,7 +369,7 @@ class Completer( object ):
       if filetype in supported:
         return filetype
 
-    return filetypes[0]
+    return filetypes[ 0 ]
 
 
   @abc.abstractmethod
@@ -309,54 +382,53 @@ class Completer( object ):
 
 
   def Shutdown( self ):
-    pass
+    pass # pragma: no cover
 
 
   def ServerIsReady( self ):
-    """Called by the /ready handler to check if the underlying completion
+    return self.ServerIsHealthy()
+
+
+  def ServerIsHealthy( self ):
+    """Called by the /healthy handler to check if the underlying completion
     server is started and ready to receive requests. Returns bool."""
     return True
 
 
+  def PollForMessages( self, request_data ):
+    return self.PollForMessagesInner( request_data, MESSAGE_POLL_TIMEOUT )
+
+
+  def PollForMessagesInner( self, request_data, timeout ):
+    # Most completers don't implement this. It's only required where unsolicited
+    # messages or diagnostics are supported, such as in the Language Server
+    # Protocol. As such, the default implementation just returns False, meaning
+    # that unsolicited messages are not supported for this filetype.
+    return False
+
+
 class CompletionsCache( object ):
+  """Cache of computed completions for a particular request."""
+
   def __init__( self ):
-    self._access_lock = threading.Lock()
+    self._access_lock = threading.RLock()
     self.Invalidate()
 
 
   def Invalidate( self ):
     with self._access_lock:
-      self._line = -1
-      self._column = -1
-      self._completion_type = -1
-      self._completions = []
+      self._request_data = None
+      self._completions = None
 
 
-  def Update( self, line, column, completion_type, completions ):
+  def Update( self, request_data, completions ):
     with self._access_lock:
-      self._line = line
-      self._column = column
-      self._completion_type = completion_type
+      self._request_data = request_data
       self._completions = completions
 
 
-  def GetCompletions( self ):
+  def GetCompletionsIfCacheValid( self, request_data ):
     with self._access_lock:
-      return self._completions
-
-
-  def GetCompletionsIfCacheValid( self, current_line, start_column, completion_type ):
-    with self._access_lock:
-      if not self._CacheValidNoLock( current_line, start_column, completion_type ):
-        return None
-      return self._completions
-
-
-  def CacheValid( self, current_line, start_column ):
-    with self._access_lock:
-      return self._CacheValidNoLock( current_line, start_column )
-
-
-  def _CacheValidNoLock( self, current_line, start_column, completion_type ):
-    return current_line == self._line and start_column == self._column and completion_type == self._completion_type
-
+      if self._request_data and self._request_data == request_data:
+        return self._completions
+      return None

@@ -1,21 +1,19 @@
-#!/usr/bin/env python
+# Copyright (C) 2014 Google Inc.
 #
-# Copyright (C) 2014  Google Inc.
+# This file is part of ycmd.
 #
-# This file is part of YouCompleteMe.
-#
-# YouCompleteMe is free software: you can redistribute it and/or modify
+# ycmd is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# YouCompleteMe is distributed in the hope that it will be useful,
+# ycmd is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+# along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
 import ycm_core
@@ -72,35 +70,6 @@ def DirectoryOfThisScript():
   return os.path.dirname( os.path.abspath( __file__ ) )
 
 
-def MakeRelativePathsInFlagsAbsolute( flags, working_directory ):
-  if not working_directory:
-    return list( flags )
-  new_flags = []
-  make_next_absolute = False
-  path_flags = [ '-isystem', '-I', '-iquote', '--sysroot=' ]
-  for flag in flags:
-    new_flag = flag
-
-    if make_next_absolute:
-      make_next_absolute = False
-      if not flag.startswith( '/' ):
-        new_flag = os.path.join( working_directory, flag )
-
-    for path_flag in path_flags:
-      if flag == path_flag:
-        make_next_absolute = True
-        break
-
-      if flag.startswith( path_flag ):
-        path = flag[ len( path_flag ): ]
-        new_flag = path_flag + os.path.join( working_directory, path )
-        break
-
-    if new_flag:
-      new_flags.append( new_flag )
-  return new_flags
-
-
 def IsHeaderFile( filename ):
   extension = os.path.splitext( filename )[ 1 ]
   return extension in [ '.h', '.hxx', '.hpp', '.hh' ]
@@ -127,22 +96,19 @@ def GetCompilationInfoForFile( filename ):
 # This is the entry point; this function is called by ycmd to produce flags for
 # a file.
 def FlagsForFile( filename, **kwargs ):
-  if database:
-    # Bear in mind that compilation_info.compiler_flags_ does NOT return a
-    # python list, but a "list-like" StringVec object
-    compilation_info = GetCompilationInfoForFile( filename )
-    if not compilation_info:
-      return None
+  if not database:
+    return {
+      'flags': flags,
+      'include_paths_relative_to_dir': DirectoryOfThisScript()
+    }
 
-    final_flags = MakeRelativePathsInFlagsAbsolute(
-      compilation_info.compiler_flags_,
-      compilation_info.compiler_working_dir_ )
-  else:
-    relative_to = DirectoryOfThisScript()
-    final_flags = MakeRelativePathsInFlagsAbsolute( flags, relative_to )
+  compilation_info = GetCompilationInfoForFile( filename )
+  if not compilation_info:
+    return None
 
+  # Bear in mind that compilation_info.compiler_flags_ does NOT return a
+  # python list, but a "list-like" StringVec object.
   return {
-    'flags': final_flags,
-    'do_cache': True
+    'flags': list( compilation_info.compiler_flags_ ),
+    'include_paths_relative_to_dir': compilation_info.compiler_working_dir_
   }
-

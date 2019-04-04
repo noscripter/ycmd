@@ -1,30 +1,28 @@
-// Copyright (C) 2011, 2012  Google Inc.
+// Copyright (C) 2011-2018 ycmd contributors
 //
-// This file is part of YouCompleteMe.
+// This file is part of ycmd.
 //
-// YouCompleteMe is free software: you can redistribute it and/or modify
+// ycmd is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// YouCompleteMe is distributed in the hope that it will be useful,
+// ycmd is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+// along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef COMPILATIONDATABASE_H_ZT7MQXPG
 #define COMPILATIONDATABASE_H_ZT7MQXPG
 
-#include <vector>
-#include <string>
-#include <boost/utility.hpp>
-#include <boost/shared_ptr.hpp>
-#include <boost/thread/mutex.hpp>
 #include <clang-c/CXCompilationDatabase.h>
-
+#include <mutex>
+#include <pybind11/pybind11.h>
+#include <string>
+#include <vector>
 
 namespace YouCompleteMe {
 
@@ -35,9 +33,12 @@ struct CompilationInfoForFile {
 
 
 // Access to Clang's internal CompilationDatabase. This class is thread-safe.
-class CompilationDatabase : boost::noncopyable {
+class CompilationDatabase {
 public:
-  CompilationDatabase( const std::string &path_to_directory );
+  // |path_to_directory| should be a string-like object.
+  explicit CompilationDatabase( const pybind11::object &path_to_directory );
+  CompilationDatabase( const CompilationDatabase& ) = delete;
+  CompilationDatabase& operator=( const CompilationDatabase& ) = delete;
   ~CompilationDatabase();
 
   bool DatabaseSuccessfullyLoaded();
@@ -48,14 +49,20 @@ public:
 
   // NOTE: Multiple calls to this function from separate threads will be
   // serialized since Clang internals are not thread-safe.
+  // |path_to_file| should be a string-like object.
   CompilationInfoForFile GetCompilationInfoForFile(
-    const std::string &path_to_file );
+    const pybind11::object &path_to_file );
+
+  std::string GetDatabaseDirectory() {
+    return path_to_directory_;
+  }
 
 private:
 
   bool is_loaded_;
+  std::string path_to_directory_;
   CXCompilationDatabase compilation_database_;
-  boost::mutex compilation_database_mutex_;
+  std::mutex compilation_database_mutex_;
 };
 
 } // namespace YouCompleteMe

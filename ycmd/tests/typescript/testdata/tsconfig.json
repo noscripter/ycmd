@@ -1,8 +1,2 @@
 {
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "files": [
-    "test.ts"
-  ]
 }

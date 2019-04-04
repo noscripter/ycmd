@@ -1,15 +1,20 @@
 
 class Foo {
-  // Unicode string: 说话
+  /** Unicode string: 说话 */
   methodA() {}
   methodB() {}
-  methodC() {}
+  methodC(
+    a: {
+      foo: string;
+      bar: number;
+    }
+  ) {}
 }
 
 var foo = new Foo();
 
-// line 12, column 6
-foo.m
+// line 17, column 6
+foo.mA
 
 
 /**
@@ -27,5 +32,8 @@ class Bar {
 
 var bar = new Bar();
 bar.testMethod();
+bar.nonExistingMethod();
 
 Bar.apply()
+
+Bår

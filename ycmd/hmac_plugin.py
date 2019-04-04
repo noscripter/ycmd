@@ -1,31 +1,37 @@
-#!/usr/bin/env python
+# Copyright (C) 2014-2018 ycmd contributors
 #
-# Copyright (C) 2014  Google Inc.
+# This file is part of ycmd.
 #
-# This file is part of YouCompleteMe.
-#
-# YouCompleteMe is free software: you can redistribute it and/or modify
+# ycmd is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# YouCompleteMe is distributed in the hope that it will be useful,
+# ycmd is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+# along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
-import logging
-import httplib
-from urlparse import urlparse
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
+
+import requests
 from base64 import b64decode, b64encode
-from bottle import request, response, abort
+from bottle import request, abort
 from ycmd import hmac_utils
+from ycmd.utils import LOGGER, ToBytes, urlparse
+from ycmd.bottle_utils import SetResponseHeader
 
 _HMAC_HEADER = 'x-ycm-hmac'
 _HOST_HEADER = 'host'
+
 
 # This class implements the Bottle plugin API:
 # http://bottlepy.org/docs/dev/plugindev.html
@@ -43,21 +49,21 @@ class HmacPlugin( object ):
 
   def __init__( self, hmac_secret ):
     self._hmac_secret = hmac_secret
-    self._logger = logging.getLogger( __name__ )
 
 
   def __call__( self, callback ):
     def wrapper( *args, **kwargs ):
       if not HostHeaderCorrect( request ):
-        self._logger.info( 'Dropping request with bad Host header.' )
-        abort( httplib.UNAUTHORIZED, 'Unauthorized, received bad Host header.' )
+        LOGGER.info( 'Dropping request with bad Host header' )
+        abort( requests.codes.unauthorized,
+               'Unauthorized, received bad Host header.' )
         return
 
-      body = request.body.read()
+      body = ToBytes( request.body.read() )
       if not RequestAuthenticated( request.method, request.path, body,
                                    self._hmac_secret ):
-        self._logger.info( 'Dropping request with bad HMAC.' )
-        abort( httplib.UNAUTHORIZED, 'Unauthorized, received bad HMAC.' )
+        LOGGER.info( 'Dropping request with bad HMAC' )
+        abort( requests.codes.unauthorized, 'Unauthorized, received bad HMAC.' )
         return
       body = callback( *args, **kwargs )
       SetHmacHeader( body, self._hmac_secret )
@@ -74,11 +80,16 @@ def RequestAuthenticated( method, path, body, hmac_secret ):
   if _HMAC_HEADER not in request.headers:
     return False
 
-  return hmac_utils.SecureStringsEqual(
-      hmac_utils.CreateRequestHmac( method, path, body, hmac_secret ),
-      b64decode( request.headers[ _HMAC_HEADER ] ) )
+  return hmac_utils.SecureBytesEqual(
+      hmac_utils.CreateRequestHmac(
+        ToBytes( method ),
+        ToBytes( path ),
+        ToBytes( body ),
+        ToBytes( hmac_secret ) ),
+      ToBytes( b64decode( request.headers[ _HMAC_HEADER ] ) ) )
 
 
 def SetHmacHeader( body, hmac_secret ):
-  response.headers[ _HMAC_HEADER ] = b64encode(
-      hmac_utils.CreateHmac( body, hmac_secret ) )
+  value = b64encode( hmac_utils.CreateHmac( ToBytes( body ),
+                                            ToBytes( hmac_secret ) ) )
+  SetResponseHeader( _HMAC_HEADER, value )

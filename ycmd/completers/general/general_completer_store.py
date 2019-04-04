@@ -1,22 +1,26 @@
-#!/usr/bin/env python
+# Copyright (C) 2013-2018 ycmd contributors
 #
-# Copyright (C) 2013  Stanislav Golovanov <stgolovanov@gmail.com>
-#                     Google Inc.
+# This file is part of ycmd.
 #
-# This file is part of YouCompleteMe.
-#
-# YouCompleteMe is free software: you can redistribute it and/or modify
+# ycmd is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# YouCompleteMe is distributed in the hope that it will be useful,
+# ycmd is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+# along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
 
 from ycmd.completers.completer import Completer
 from ycmd.completers.all.identifier_completer import IdentifierCompleter
@@ -28,7 +32,7 @@ class GeneralCompleterStore( Completer ):
   """
   Holds a list of completers that can be used in all filetypes.
 
-  It overrides all Competer API methods so that specific calls to
+  It overrides all Completer API methods so that specific calls to
   GeneralCompleterStore are passed to all general completers.
   """
 
@@ -40,11 +44,9 @@ class GeneralCompleterStore( Completer ):
     self._non_filename_completers = [ self._identifier_completer ]
     if user_options.get( 'use_ultisnips_completer', True ):
       self._non_filename_completers.append( self._ultisnips_completer )
-
     self._all_completers = [ self._identifier_completer,
                              self._filename_completer,
                              self._ultisnips_completer ]
-    self._current_query_completers = []
 
 
   def SupportedFiletypes( self ):
@@ -55,33 +57,12 @@ class GeneralCompleterStore( Completer ):
     return self._identifier_completer
 
 
-  def ShouldUseNow( self, request_data ):
-    self._current_query_completers = []
-
-    if self._filename_completer.ShouldUseNow( request_data ):
-      self._current_query_completers = [ self._filename_completer ]
-      return True
-
-    should_use_now = False
-
-    for completer in self._non_filename_completers:
-      should_use_this_completer = completer.ShouldUseNow( request_data )
-      should_use_now = should_use_now or should_use_this_completer
-
-      if should_use_this_completer:
-        self._current_query_completers.append( completer )
-
-    return should_use_now
-
-
   def ComputeCandidates( self, request_data ):
-    if not self.ShouldUseNow( request_data ):
-      return []
-
-    candidates = []
-    for completer in self._current_query_completers:
+    candidates = self._filename_completer.ComputeCandidates( request_data )
+    if candidates:
+      return candidates
+    for completer in self._non_filename_completers:
       candidates += completer.ComputeCandidates( request_data )
-
     return candidates
 
 
@@ -118,5 +99,3 @@ class GeneralCompleterStore( Completer ):
   def Shutdown( self ):
     for completer in self._all_completers:
       completer.Shutdown()
-
-

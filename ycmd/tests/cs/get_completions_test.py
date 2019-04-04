@@ -1,7 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# coding: utf-8
 #
-# Copyright (C) 2015 ycmd contributors.
+# Copyright (C) 2015-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -18,145 +17,142 @@
 # You should have received a copy of the GNU General Public License
 # along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
-from webtest import AppError
+from __future__ import absolute_import
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
+
+from hamcrest import ( assert_that, calling, empty, greater_than, has_item,
+                       has_items, has_entries, raises )
 from nose.tools import eq_
-from hamcrest import ( assert_that, empty, greater_than, has_item, has_items,
-                       has_entries )
-from cs_handlers_test import Cs_Handlers_test
+from webtest import AppError
+
+from ycmd.tests.cs import PathToTestFile, SharedYcmd, WrapOmniSharpServer
+from ycmd.tests.test_utils import BuildRequest, CompletionEntryMatcher
+from ycmd.utils import ReadFile
 
 
-class Cs_GetCompletions_test( Cs_Handlers_test ):
+@SharedYcmd
+def GetCompletions_Basic_test( app ):
+  filepath = PathToTestFile( 'testy', 'Program.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
 
-  def Basic_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'Program.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
-
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
-
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 10,
-                                          column_num = 12 )
-    response_data = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 10,
+                                    column_num = 12 )
+    response_data = app.post_json( '/completions', completion_data ).json
     assert_that( response_data[ 'completions' ],
-                 has_items( self._CompletionEntryMatcher( 'CursorLeft' ),
-                            self._CompletionEntryMatcher( 'CursorSize' ) ) )
+                 has_items( CompletionEntryMatcher( 'CursorLeft' ),
+                            CompletionEntryMatcher( 'CursorSize' ) ) )
     eq_( 12, response_data[ 'completion_start_column' ] )
 
-    self._StopOmniSharpServer( filepath )
+
+@SharedYcmd
+def GetCompletions_Unicode_test( app ):
+  filepath = PathToTestFile( 'testy', 'Unicode.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
+
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 43,
+                                    column_num = 26 )
+    response_data = app.post_json( '/completions', completion_data ).json
+    assert_that( response_data[ 'completions' ],
+                 has_items(
+                   CompletionEntryMatcher( 'DoATest()' ),
+                   CompletionEntryMatcher( 'an_int' ),
+                   CompletionEntryMatcher( 'a_unicøde' ),
+                   CompletionEntryMatcher( 'øøø' ) ) )
+
+    eq_( 26, response_data[ 'completion_start_column' ] )
 
 
-  def MultipleSolution_test( self ):
-    filepaths = [ self._PathToTestFile( 'testy', 'Program.cs' ),
-                  self._PathToTestFile( 'testy-multiple-solutions',
-                                        'solution-named-like-folder',
-                                        'testy',
-                                        'Program.cs' ) ]
-    lines = [ 10, 9 ]
-    for filepath, line in zip( filepaths, lines ):
-      contents = open( filepath ).read()
-      event_data = self._BuildRequest( filepath = filepath,
-                                       filetype = 'cs',
-                                       contents = contents,
-                                       event_name = 'FileReadyToParse' )
+@SharedYcmd
+def GetCompletions_MultipleSolution_test( app ):
+  filepaths = [ PathToTestFile( 'testy', 'Program.cs' ),
+                PathToTestFile( 'testy-multiple-solutions',
+                                'solution-named-like-folder',
+                                'testy',
+                                'Program.cs' ) ]
+  lines = [ 10, 9 ]
+  for filepath, line in zip( filepaths, lines ):
+    with WrapOmniSharpServer( app, filepath ):
+      contents = ReadFile( filepath )
 
-      self._app.post_json( '/event_notification', event_data )
-      self._WaitUntilOmniSharpServerReady( filepath )
-
-      completion_data = self._BuildRequest( filepath = filepath,
-                                            filetype = 'cs',
-                                            contents = contents,
-                                            line_num = line,
-                                            column_num = 12 )
-      response_data = self._app.post_json( '/completions',
-                                           completion_data ).json
+      completion_data = BuildRequest( filepath = filepath,
+                                      filetype = 'cs',
+                                      contents = contents,
+                                      line_num = line,
+                                      column_num = 12 )
+      response_data = app.post_json( '/completions',
+                                     completion_data ).json
       assert_that( response_data[ 'completions' ],
-                   has_items( self._CompletionEntryMatcher( 'CursorLeft' ),
-                              self._CompletionEntryMatcher( 'CursorSize' ) ) )
+                   has_items( CompletionEntryMatcher( 'CursorLeft' ),
+                              CompletionEntryMatcher( 'CursorSize' ) ) )
       eq_( 12, response_data[ 'completion_start_column' ] )
 
-      self._StopOmniSharpServer( filepath )
 
+@SharedYcmd
+def GetCompletions_PathWithSpace_test( app ):
+  filepath = PathToTestFile( u'неприличное слово', 'Program.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
 
-  def PathWithSpace_test( self ):
-    filepath = self._PathToTestFile( u'неприличное слово', 'Program.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
-
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
-
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 12 )
-    response_data = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 12 )
+    response_data = app.post_json( '/completions', completion_data ).json
     assert_that( response_data[ 'completions' ],
-                 has_items( self._CompletionEntryMatcher( 'CursorLeft' ),
-                            self._CompletionEntryMatcher( 'CursorSize' ) ) )
+                 has_items( CompletionEntryMatcher( 'CursorLeft' ),
+                            CompletionEntryMatcher( 'CursorSize' ) ) )
     eq_( 12, response_data[ 'completion_start_column' ] )
 
-    self._StopOmniSharpServer( filepath )
 
+@SharedYcmd
+def GetCompletions_HasBothImportsAndNonImport_test( app ):
+  filepath = PathToTestFile( 'testy', 'ImportTest.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
 
-  def HasBothImportsAndNonImport_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'ImportTest.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
-
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
-
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 12,
-                                          force_semantic = True,
-                                          query = 'Date' )
-    response_data = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 12,
+                                    force_semantic = True,
+                                    query = 'Date' )
+    response_data = app.post_json( '/completions', completion_data ).json
 
     assert_that(
       response_data[ 'completions' ],
-      has_items( self._CompletionEntryMatcher( 'DateTime' ),
-                 self._CompletionEntryMatcher( 'DateTimeStyles' ) )
+      has_items( CompletionEntryMatcher( 'DateTime' ),
+                 CompletionEntryMatcher( 'DateTimeStyles' ) )
     )
 
-    self._StopOmniSharpServer( filepath )
 
+@SharedYcmd
+def GetCompletions_ImportsOrderedAfter_test( app ):
+  filepath = PathToTestFile( 'testy', 'ImportTest.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
 
-  def ImportsOrderedAfter_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'ImportTest.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
-
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
-
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 12,
-                                          force_semantic = True,
-                                          query = 'Date' )
-    response_data = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 12,
+                                    force_semantic = True,
+                                    query = 'Date' )
+    response_data = app.post_json( '/completions', completion_data ).json
 
     min_import_index = min(
       loc for loc, val
@@ -171,54 +167,48 @@ class Cs_GetCompletions_test( Cs_Handlers_test ):
     )
 
     assert_that( min_import_index, greater_than( max_nonimport_index ) ),
-    self._StopOmniSharpServer( filepath )
 
 
-  def ForcedReturnsResults_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'ContinuousTest.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
+@SharedYcmd
+def GetCompletions_ForcedReturnsResults_test( app ):
+  filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
 
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
-
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 21,
-                                          force_semantic = True,
-                                          query = 'Date' )
-    response_data = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 21,
+                                    force_semantic = True,
+                                    query = 'Date' )
+    response_data = app.post_json( '/completions', completion_data ).json
 
     assert_that( response_data[ 'completions' ],
-                 has_items( self._CompletionEntryMatcher( 'String' ),
-                            self._CompletionEntryMatcher( 'StringBuilder' ) ) )
-    self._StopOmniSharpServer( filepath )
+                 has_items( CompletionEntryMatcher( 'String' ),
+                            CompletionEntryMatcher( 'StringBuilder' ) ) )
 
 
-  def NonForcedReturnsNoResults_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'ContinuousTest.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
+@SharedYcmd
+def GetCompletions_NonForcedReturnsNoResults_test( app ):
+  filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
+    event_data = BuildRequest( filepath = filepath,
+                               filetype = 'cs',
+                               contents = contents,
+                               event_name = 'FileReadyToParse' )
 
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
+    app.post_json( '/event_notification', event_data )
 
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 21,
-                                          force_semantic = False,
-                                          query = 'Date' )
-    results = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 21,
+                                    force_semantic = False,
+                                    query = 'Date' )
+    results = app.post_json( '/completions', completion_data ).json
 
     # There are no semantic completions. However, we fall back to identifier
     # completer in this case.
@@ -229,40 +219,40 @@ class Cs_GetCompletions_test( Cs_Handlers_test ):
       } ) ),
       'errors': empty(),
     } ) )
-    self._StopOmniSharpServer( filepath )
 
 
-  def ForcedDividesCache_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'ContinuousTest.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
+@SharedYcmd
+def GetCompletions_ForcedDividesCache_test( app ):
+  filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
+    event_data = BuildRequest( filepath = filepath,
+                               filetype = 'cs',
+                               contents = contents,
+                               event_name = 'FileReadyToParse' )
 
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
+    app.post_json( '/event_notification', event_data )
 
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 21,
-                                          force_semantic = True,
-                                          query = 'Date' )
-    results = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 21,
+                                    force_semantic = True,
+                                    query = 'Date' )
+    results = app.post_json( '/completions', completion_data ).json
 
     assert_that( results[ 'completions' ], not( empty() ) )
     assert_that( results[ 'errors' ], empty() )
 
-    completion_data = self._BuildRequest( filepath = filepath,
-                                          filetype = 'cs',
-                                          contents = contents,
-                                          line_num = 9,
-                                          column_num = 21,
-                                          force_semantic = False,
-                                          query = 'Date' )
-    results = self._app.post_json( '/completions', completion_data ).json
+    completion_data = BuildRequest( filepath = filepath,
+                                    filetype = 'cs',
+                                    contents = contents,
+                                    line_num = 9,
+                                    column_num = 21,
+                                    force_semantic = False,
+                                    query = 'Date' )
+    results = app.post_json( '/completions', completion_data ).json
 
     # There are no semantic completions. However, we fall back to identifier
     # completer in this case.
@@ -273,157 +263,146 @@ class Cs_GetCompletions_test( Cs_Handlers_test ):
       } ) ),
       'errors': empty(),
     } ) )
-    self._StopOmniSharpServer( filepath )
 
 
-  def ReloadSolution_Basic_test( self ):
-    filepath = self._PathToTestFile( 'testy', 'Program.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
-
-    self._app.post_json( '/event_notification', event_data )
-    self._WaitUntilOmniSharpServerReady( filepath )
-    result = self._app.post_json(
+@SharedYcmd
+def GetCompletions_ReloadSolution_Basic_test( app ):
+  filepath = PathToTestFile( 'testy', 'Program.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    result = app.post_json(
       '/run_completer_command',
-      self._BuildRequest( completer_target = 'filetype_default',
-                          command_arguments = [ 'ReloadSolution' ],
-                          filepath = filepath,
-                          filetype = 'cs' ) ).json
+      BuildRequest( completer_target = 'filetype_default',
+                    command_arguments = [ 'ReloadSolution' ],
+                    filepath = filepath,
+                    filetype = 'cs' ) ).json
 
-    self._StopOmniSharpServer( filepath )
     eq_( result, True )
 
 
-  def ReloadSolution_MultipleSolution_test( self ):
-    filepaths = [ self._PathToTestFile( 'testy', 'Program.cs' ),
-                  self._PathToTestFile( 'testy-multiple-solutions',
-                                        'solution-named-like-folder',
-                                        'testy',
-                                        'Program.cs' ) ]
-    for filepath in filepaths:
-      contents = open( filepath ).read()
-      event_data = self._BuildRequest( filepath = filepath,
-                                       filetype = 'cs',
-                                       contents = contents,
-                                       event_name = 'FileReadyToParse' )
-
-      self._app.post_json( '/event_notification', event_data )
-      self._WaitUntilOmniSharpServerReady( filepath )
-      result = self._app.post_json(
+@SharedYcmd
+def GetCompletions_ReloadSolution_MultipleSolution_test( app ):
+  filepaths = [ PathToTestFile( 'testy', 'Program.cs' ),
+                PathToTestFile( 'testy-multiple-solutions',
+                                'solution-named-like-folder',
+                                'testy',
+                                'Program.cs' ) ]
+  for filepath in filepaths:
+    with WrapOmniSharpServer( app, filepath ):
+      result = app.post_json(
         '/run_completer_command',
-        self._BuildRequest( completer_target = 'filetype_default',
-                            command_arguments = [ 'ReloadSolution' ],
-                            filepath = filepath,
-                            filetype = 'cs' ) ).json
+        BuildRequest( completer_target = 'filetype_default',
+                      command_arguments = [ 'ReloadSolution' ],
+                      filepath = filepath,
+                      filetype = 'cs' ) ).json
 
-      self._StopOmniSharpServer( filepath )
       eq_( result, True )
 
 
-  def _SolutionSelectCheck( self, sourcefile, reference_solution,
-                            extra_conf_store = None ):
-    # reusable test: verify that the correct solution (reference_solution) is
-    #   detected for a given source file (and optionally a given extra_conf)
-    if extra_conf_store:
-      self._app.post_json( '/load_extra_conf_file',
-                           { 'filepath': extra_conf_store } )
+def SolutionSelectCheck( app, sourcefile, reference_solution,
+                         extra_conf_store = None ):
+  # reusable test: verify that the correct solution (reference_solution) is
+  #   detected for a given source file (and optionally a given extra_conf)
+  if extra_conf_store:
+    app.post_json( '/load_extra_conf_file',
+                   { 'filepath': extra_conf_store } )
 
-    result = self._app.post_json(
-      '/run_completer_command',
-      self._BuildRequest( completer_target = 'filetype_default',
-                          command_arguments = [ 'SolutionFile' ],
-                          filepath = sourcefile,
-                          filetype = 'cs' ) ).json
+  result = app.post_json( '/run_completer_command',
+                          BuildRequest( completer_target = 'filetype_default',
+                                        command_arguments = [ 'SolutionFile' ],
+                                        filepath = sourcefile,
+                                        filetype = 'cs' ) ).json
 
-    # Now that cleanup is done, verify solution file
-    eq_( reference_solution, result)
-
-
-  def UsesSubfolderHint_test( self ):
-    self._SolutionSelectCheck(
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-named-like-folder',
-                            'testy', 'Program.cs' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-named-like-folder',
-                            'testy.sln' ) )
+  # Now that cleanup is done, verify solution file
+  eq_( reference_solution, result )
 
 
-  def UsesSuperfolderHint_test( self ):
-    self._SolutionSelectCheck(
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-named-like-folder',
-                            'not-testy', 'Program.cs' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-named-like-folder',
-                            'solution-named-like-folder.sln' ) )
+@SharedYcmd
+def GetCompletions_UsesSubfolderHint_test( app ):
+  SolutionSelectCheck( app,
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-named-like-folder',
+                                       'testy', 'Program.cs' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-named-like-folder',
+                                       'testy.sln' ) )
 
 
-  def ExtraConfStoreAbsolute_test( self ):
-    self._SolutionSelectCheck(
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-abs',
-                            'testy', 'Program.cs' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'testy2.sln' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-abs',
-                            '.ycm_extra_conf.py' ) )
+@SharedYcmd
+def GetCompletions_UsesSuperfolderHint_test( app ):
+  SolutionSelectCheck( app,
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-named-like-folder',
+                                       'not-testy', 'Program.cs' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-named-like-folder',
+                                       'solution-named-like-folder.sln' ) )
 
 
-  def ExtraConfStoreRelative_test( self ):
-    self._SolutionSelectCheck(
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-rel',
-                            'testy', 'Program.cs' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-rel',
-                            'testy2.sln' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-rel',
-                            '.ycm_extra_conf.py' ) )
+@SharedYcmd
+def GetCompletions_ExtraConfStoreAbsolute_test( app ):
+  SolutionSelectCheck( app,
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-abs',
+                                       'testy', 'Program.cs' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'testy2.sln' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-abs',
+                                       '.ycm_extra_conf.py' ) )
 
 
-  def ExtraConfStoreNonexisting_test( self ):
-    self._SolutionSelectCheck(
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-bad',
-                            'testy', 'Program.cs' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-bad',
-                            'testy2.sln' ),
-      self._PathToTestFile( 'testy-multiple-solutions',
-                            'solution-not-named-like-folder', 'extra-conf-bad',
-                            'testy', '.ycm_extra_conf.py' ) )
+@SharedYcmd
+def GetCompletions_ExtraConfStoreRelative_test( app ):
+  SolutionSelectCheck( app,
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-rel',
+                                       'testy', 'Program.cs' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-rel',
+                                       'testy2.sln' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-rel',
+                                       '.ycm_extra_conf.py' ) )
 
 
-  def DoesntStartWithAmbiguousMultipleSolutions_test( self ):
-    filepath = self._PathToTestFile( 'testy-multiple-solutions',
-                                     'solution-not-named-like-folder',
-                                     'testy', 'Program.cs' )
-    contents = open( filepath ).read()
-    event_data = self._BuildRequest( filepath = filepath,
-                                     filetype = 'cs',
-                                     contents = contents,
-                                     event_name = 'FileReadyToParse' )
+@SharedYcmd
+def GetCompletions_ExtraConfStoreNonexisting_test( app ):
+  SolutionSelectCheck( app,
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-bad',
+                                       'testy', 'Program.cs' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-bad',
+                                       'testy2.sln' ),
+                       PathToTestFile( 'testy-multiple-solutions',
+                                       'solution-not-named-like-folder',
+                                       'extra-conf-bad',
+                                       'testy', '.ycm_extra_conf.py' ) )
 
-    exception_caught = False
-    try:
-      self._app.post_json( '/event_notification', event_data )
-    except AppError as e:
-      if 'Autodetection of solution file failed' in str( e ):
-        exception_caught = True
 
-    # The test passes if we caught an exception when trying to start it,
-    # so raise one if it managed to start
-    if not exception_caught:
-      self._WaitUntilOmniSharpServerReady( filepath )
-      self._StopOmniSharpServer( filepath )
-      raise Exception( 'The Omnisharp server started, despite us not being '
-                       'able to find a suitable solution file to feed it. Did '
-                       'you fiddle with the solution finding code in '
-                       'cs_completer.py? Hopefully you\'ve enhanced it: you '
-                       'need to update this test then :)' )
+@SharedYcmd
+def GetCompletions_DoesntStartWithAmbiguousMultipleSolutions_test( app ):
+  filepath = PathToTestFile( 'testy-multiple-solutions',
+                             'solution-not-named-like-folder',
+                             'testy', 'Program.cs' )
+  contents = ReadFile( filepath )
+  event_data = BuildRequest( filepath = filepath,
+                             filetype = 'cs',
+                             contents = contents,
+                             event_name = 'FileReadyToParse' )
+
+  assert_that(
+    calling( app.post_json ).with_args( '/event_notification', event_data ),
+    raises( AppError, 'Autodetection of solution file failed' ),
+    "The Omnisharp server started, despite us not being able to find a "
+    "suitable solution file to feed it. Did you fiddle with the solution "
+    "finding code in cs_completer.py? Hopefully you've enhanced it: you need "
+    "to update this test then :)" )

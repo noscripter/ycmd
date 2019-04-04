@@ -1,9 +1,10 @@
 ycmd: a code-completion & comprehension server
 ==============================================
 
-[![Build Status](https://travis-ci.org/Valloric/ycmd.svg?branch=master)](https://travis-ci.org/Valloric/ycmd)
-[![Build status](https://ci.appveyor.com/api/projects/status/6fetp5xwb0kkuv2w/branch/master?svg=true)](https://ci.appveyor.com/project/Valloric/ycmd)
-[![Coverage Status](https://coveralls.io/repos/Valloric/ycmd/badge.svg?branch=master&service=github)](https://coveralls.io/github/Valloric/ycmd?branch=master)
+[![Linux build status](https://img.shields.io/travis/Valloric/ycmd/master.svg?label=Linux)](https://travis-ci.org/Valloric/ycmd)
+[![macOS build status](https://img.shields.io/circleci/project/github/Valloric/ycmd/master.svg?label=macOS)](https://circleci.com/gh/Valloric/ycmd)
+[![Windows build status](https://img.shields.io/appveyor/ci/Valloric/ycmd/master.svg?label=Windows)](https://ci.appveyor.com/project/Valloric/ycmd)
+[![Coverage status](https://img.shields.io/codecov/c/github/Valloric/ycmd/master.svg)](https://codecov.io/gh/Valloric/ycmd)
 
 ycmd is a server that provides APIs for code-completion and other
 code-comprehension use-cases like semantic GoTo commands (and others). For
@@ -12,50 +13,71 @@ certain filetypes, ycmd can also provide diagnostic errors and warnings.
 ycmd was originally part of [YouCompleteMe][ycm]'s codebase, but has been split
 out into a separate project so that it can be used in editors other than Vim.
 
-The best way to learn how to interact with ycmd is by reading through (and
-running) the [`example_client.py`][example-client] file. See the [README for the
+Check [the API documentation][api-docs] if you want to implement a client. A
+good way to learn how to interact with ycmd is by reading through (and running)
+the [`example_client.py`][example-client] file. See the [README for the
 examples][example-readme] folder for details on how to run the example client.
 
 Known ycmd clients:
 ------------------
 
 - [YouCompleteMe][ycm]: Vim client, stable and exposes all ycmd features.
-- [emacs-ycmd][]: Emacs client, still a bit experimental.
+- [emacs-ycmd][]: Emacs client.
 - [you-complete-me][atom-you-complete-me]: Atom client.
+- [YcmdCompletion][sublime-ycmd-completion]: Sublime client
+- [sublime-ycmd][sublime-ycmd]: Sublime Text 3 client.
 - [kak-ycmd][]: Kakoune client.
+- [you-complete-me][vscode-you-complete-me]: VSCode client.
+- [gycm][]: Geany client.
+- [nano-ycmd][]: GNU nano client.
 
 Feel free to send a pull request adding a link to your client here if you've
 built one.
 
 Building
 --------
+**If you're looking to develop ycmd, see the [instructions for running the
+tests][test-setup].**
 
-[Clients commonly build and set up ycmd for you; you are unlikely to need to
-build ycmd yourself unless you want to build a new client.]
+This is all for Ubuntu Linux. Details on getting ycmd running on other OS's can
+be found in [YCM's instructions][ycm-install] (ignore the Vim-specific parts).
+Note that **ycmd runs on Python 2.7.1+ and 3.4+.**
 
-This is all for Ubuntu Linux. Details on getting ycmd running on other OS's can be
-found in [YCM's instructions][ycm-install] (ignore the Vim-specific parts).
-
-First, install the dependencies:
+First, install the minimal dependencies:
 ```
-sudo apt-get install build-essential cmake python-dev
+sudo apt install build-essential cmake python3-dev
 ```
+
+Next, install the language specific dependencies you need:
+- `sudo apt install golang-go` for Go.
+- `sudo apt install npm` for JavaScript and TypeScript.
+- `sudo apt install mono-devel` for C#.
+- install Cargo and rustc with [rustup][] for Rust.
+- `sudo apt install openjdk-8-jre` for Java.
 
 When you first clone the repository you'll need to update the submodules:
 ```
 git submodule update --init --recursive
 ```
 
-Then run `./build.py --clang-completer --omnisharp-completer --gocode-completer`.
-This should get you going.
+Then run `python3 build.py --all` or any of the specific completers listed by
+`python3 build.py --help`. This should get you going.
 
 For more detailed instructions on building ycmd, see [YCM's
 instructions][ycm-install] (ignore the Vim-specific parts).
+
+Supported compilers
+-------------------
+
+- GCC 4.8 and later
+- Clang 3.3 and later
+- Microsoft Visual Studio 2015 Update 3 and later
 
 API notes
 ---------
 
 - All strings going into and out of the server are UTF-8 encoded.
+- All lines end with `\n`.
 - All line and column numbers are 1-based, not 0-based. They are also byte
   offsets, _not_ Unicode codepoint offsets.
 - All file paths are full, absolute paths.
@@ -63,7 +85,8 @@ API notes
   header. The HMAC is computed from the shared secret passed to the server on
   startup and the request/response body. The digest algorithm is SHA-256. The
   server will also include the HMAC in its responses; you _must_ verify it
-  before using the response. See [`example_client.py`][example-client] to see how it's done.
+  before using the response. See [`example_client.py`][example-client] to see
+  how it's done.
 
 How ycmd works
 --------------
@@ -75,10 +98,15 @@ provided previously and any tags files produced by ctags. This engine is
 non-semantic.
 
 There are also several semantic engines in YCM. There's a libclang-based
-completer that provides semantic completion for C-family languages.  There's also a
-Jedi-based completer for semantic completion for Python, an OmniSharp-based
-completer for C#, a [Gocode][gocode]-based completer for Go, and a TSServer-based
-completer for TypeScript. More will be added with time.
+completer and [clangd][clangd]-based completer that both provide semantic
+completion for C-family languages. The [clangd][clangd]-based completer doesn't
+support extra conf; you must have a compilation database. [clangd][clangd]
+support is currently **experimental** and changes in the near future might break
+backwards compatibility. There's also a Jedi-based completer for semantic
+completion for Python, an OmniSharp-based completer for C#, a
+[Gocode][gocode]-based completer for Go (using [Godef][godef] for jumping to
+definitions), a TSServer-based completer for JavaScript and TypeScript, and a
+[jdt.ls][jdtls]-based server for Java. More will be added with time.
 
 There are also other completion engines, like the filepath completer (part of
 the identifier completer).
@@ -151,6 +179,17 @@ keep-alive background thread that periodically pings ycmd (just call the
 You can also turn this off by passing `--idle_suicide_seconds=0`, although that
 isn't recommended.
 
+### Exit codes
+
+During startup, ycmd attempts to load the `ycm_core` library and exits with one
+of the following return codes if unsuccessful:
+
+- 3: unexpected error while loading the library;
+- 4: the `ycm_core` library is missing;
+- 5: the `ycm_core` library is compiled for Python 2 but loaded in Python 3;
+- 6: the `ycm_core` library is compiled for Python 3 but loaded in Python 2;
+- 7: the version of the `ycm_core` library is outdated.
+
 User-level customization
 -----------------------
 
@@ -173,12 +212,148 @@ is supposed to provide to configure certain semantic completers. More
 information on it can also be found in the [corresponding section of YCM's _User
 Guide_][extra-conf-doc].
 
+### `.ycm_extra_conf.py` specification
+
+The `.ycm_extra_conf.py` module may define the following functions:
+
+#### `Settings( **kwargs )`
+
+This function allows users to configure the language completers on a per project
+basis or globally. Currently, it is required by the C-family completer and
+optional for the Python completer. The following arguments can be retrieved from
+the `kwargs` dictionary and are common to all completers:
+
+- `language`: an identifier of the completer that called the function. Its value
+  is `python` for the Python completer and `cfamily` for the C-family completer.
+  This argument is useful to configure several completers at once. For
+  instance:
+
+  ```python
+  def Settings( **kwargs ):
+    language = kwargs[ 'language' ]
+    if language == 'cfamily':
+      return {
+        # Settings for the C-family completer.
+      }
+    if language == 'python':
+      return {
+        # Settings for the Python completer.
+      }
+    return {}
+  ```
+
+- `client_data`: any additional data supplied by the client application.
+  See the [YouCompleteMe documentation][extra-conf-vim-data-doc] for an
+  example.
+
+The return value is a dictionary whose content depends on the completer.
+
+##### C-family settings
+
+The `Settings` function is called by the C-family completer to get the compiler
+flags to use when compiling the current file. The absolute path of this file is
+accessible under the `filename` key of the `kwargs` dictionary.
+[clangd][clangd]-based completer doesn't support extra conf files. If you are
+using [clangd][clangd]-based completer, you must have a compilation database in
+your project's root or in one of the parent directories to provide compiler
+flags.
+
+The return value expected by the completer is a dictionary containing the
+following items:
+
+- `flags`: (mandatory) a list of compiler flags.
+
+- `include_paths_relative_to_dir`: (optional) the directory to which the
+  include paths in the list of flags are relative. Defaults to ycmd working
+  directory.
+
+- `override_filename`: (optional) a string indicating the name of the file to
+  parse as the translation unit for the supplied file name. This fairly
+  advanced feature allows for projects that use a 'unity'-style build, or
+  for header files which depend on other includes in other files.
+
+- `do_cache`: (optional) a boolean indicating whether or not the result of
+  this call (i.e. the list of flags) should be cached for this file name.
+  Defaults to `True`. If unsure, the default is almost always correct.
+
+- `flags_ready`: (optional) a boolean indicating that the flags should be
+  used. Defaults to `True`. If unsure, the default is almost always correct.
+
+A minimal example which simply returns a list of flags is:
+
+```python
+def Settings( **kwargs ):
+  return {
+    'flags': [ '-x', 'c++' ]
+  }
+```
+
+##### Python settings
+
+The `Settings` function allows users to specify the Python interpreter and
+the `sys.path` used by the completer to provide completion and code
+comprehension. No additional arguments are passed.
+
+The return value expected by the completer is a dictionary containing the
+following items:
+
+- `interpreter_path`: (optional) path to the Python interpreter. `~` and
+  environment variables in the path are expanded. If not an absolute path, it
+  will be searched through the `PATH`.
+
+- `sys_path`: (optional) list of paths prepended to `sys.path`.
+
+Usage example:
+
+```python
+def Settings( **kwargs ):
+  return {
+    'interpreter_path': '~/project/virtual_env/bin/python',
+    'sys_path': [ '~/project/third_party/module' ]
+  }
+```
+
+#### `PythonSysPath( **kwargs )`
+
+Optional for Python support.
+
+This function allows further customization of the Python path `sys.path`. Its
+parameters are the possible items returned by the `Settings` function for the
+Python completer:
+
+- `interpreter_path`: path to the Python interpreter.
+
+- `sys_path`: list of Python paths from `sys.path`.
+
+The return value should be the modified list of Python paths.
+
+See [ycmd's own `.ycm_extra_conf.py`][ycmd-extra-conf] for an example.
+
+### Global extra conf file specification
+
+The global extra module must expose the same functions as the
+`.ycm_extra_conf.py` module with the following additions:
+
+#### `YcmCorePreLoad()`
+
+Optional.
+
+This method, if defined, is called by the server prior to importing the c++
+python plugin. It is not usually required and its use is for advanced users
+only.
+
+#### `Shutdown()`
+
+Optional.
+
+Called prior to the server exiting cleanly. It is not usually required and its
+use is for advanced users only.
 
 Backwards compatibility
 -----------------------
 
 ycmd's HTTP+JSON interface follows [SemVer][]. While ycmd has seen extensive use
-over the last several months as part of YCM, the version number is below 1.0
+over the last several years as part of YCM, the version number is below 1.0
 because some parts of the API _might_ change slightly as people discover
 possible problems integrating ycmd with other editors. In other words, the
 current API might unintentionally be Vim-specific. We don't want that.
@@ -200,6 +375,14 @@ localhost if the user visits evil.com in a browser.
 code execution exploit [was created][exploit] for ycmd running on localhost. The
 HMAC auth was added to block this attack vector.
 
+
+Contributor Code of Conduct
+---------------------------
+
+Please note that this project is released with a [Contributor Code of
+Conduct][ccoc]. By participating in this project you agree to abide by its
+terms.
+
 Contact
 -------
 
@@ -212,11 +395,13 @@ License
 -------
 
 This software is licensed under the [GPL v3 license][gpl].
-© 2015 ycmd contributors
+© 2015-2018 ycmd contributors
 
 [ycmd-users]: https://groups.google.com/forum/?hl=en#!forum/ycmd-users
 [ycm]: http://valloric.github.io/YouCompleteMe/
 [atom-you-complete-me]: https://atom.io/packages/you-complete-me
+[sublime-ycmd-completion]: https://packagecontrol.io/packages/YcmdCompletion
+[sublime-ycmd]: https://packagecontrol.io/packages/YouCompleteMe
 [semver]: http://semver.org/
 [hmac]: http://en.wikipedia.org/wiki/Hash-based_message_authentication_code
 [exploit]: https://groups.google.com/d/topic/ycm-users/NZAPrvaYgxo/discussion
@@ -224,13 +409,26 @@ This software is licensed under the [GPL v3 license][gpl].
 [example-readme]: https://github.com/Valloric/ycmd/blob/master/examples/README.md
 [trigger-defaults]: https://github.com/Valloric/ycmd/blob/master/ycmd/completers/completer_utils.py#L143
 [subsequence]: http://en.wikipedia.org/wiki/Subsequence
-[ycm-install]: https://github.com/Valloric/YouCompleteMe/blob/master/README.md#mac-os-x-super-quick-installation
+[ycm-install]: https://github.com/Valloric/YouCompleteMe/blob/master/README.md#mac-os-x
 [def-settings]: https://github.com/Valloric/ycmd/blob/master/ycmd/default_settings.json
 [base64]: http://en.wikipedia.org/wiki/Base64
 [mkstemp]: http://man7.org/linux/man-pages/man3/mkstemp.3.html
 [options]: https://github.com/Valloric/YouCompleteMe#options
-[extra-conf-doc]: https://github.com/Valloric/YouCompleteMe#c-family-semantic-completion-engine-usage
+[extra-conf-doc]: https://github.com/Valloric/YouCompleteMe#c-family-semantic-completion
 [emacs-ycmd]: https://github.com/abingham/emacs-ycmd
 [gpl]: http://www.gnu.org/copyleft/gpl.html
 [gocode]: https://github.com/nsf/gocode
+[godef]: https://github.com/Manishearth/godef
 [kak-ycmd]: https://github.com/mawww/kak-ycmd
+[ccoc]: https://github.com/Valloric/ycmd/blob/master/CODE_OF_CONDUCT.md
+[dev-setup]: https://github.com/Valloric/ycmd/blob/master/DEV_SETUP.md
+[test-setup]: https://github.com/Valloric/ycmd/blob/master/TESTS.md
+[extra-conf-vim-data-doc]: https://github.com/Valloric/YouCompleteMe#the-gycm_extra_conf_vim_data-option
+[vscode-you-complete-me]: https://marketplace.visualstudio.com/items?itemName=RichardHe.you-complete-me
+[gycm]: https://github.com/jakeanq/gycm
+[nano-ycmd]: https://github.com/orsonteodoro/nano-ycmd
+[jdtls]: https://github.com/eclipse/eclipse.jdt.ls
+[api-docs]: https://valloric.github.io/ycmd/
+[ycmd-extra-conf]: https://github.com/Valloric/ycmd/blob/master/.ycm_extra_conf.py
+[rustup]: https://www.rustup.rs/
+[clangd]: https://clang.llvm.org/extra/clangd.html

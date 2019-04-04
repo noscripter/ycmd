@@ -1,40 +1,44 @@
-// Copyright (C) 2013  Google Inc.
+// Copyright (C) 2013 Google Inc.
 //
-// This file is part of YouCompleteMe.
+// This file is part of ycmd.
 //
-// YouCompleteMe is free software: you can redistribute it and/or modify
+// ycmd is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// YouCompleteMe is distributed in the hope that it will be useful,
+// ycmd is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+// along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "TranslationUnitStore.h"
 #include "TranslationUnit.h"
 #include "Utils.h"
-#include "exceptions.h"
 
-#include <boost/thread/locks.hpp>
-#include <boost/make_shared.hpp>
-#include <boost/functional/hash.hpp>
+#include <functional>
 
-using boost::lock_guard;
-using boost::shared_ptr;
-using boost::make_shared;
-using boost::mutex;
+using std::lock_guard;
+using std::shared_ptr;
+using std::make_shared;
+using std::mutex;
 
 namespace YouCompleteMe {
 
 namespace {
 
 std::size_t HashForFlags( const std::vector< std::string > &flags ) {
-  return boost::hash< std::vector< std::string > >()( flags );
+  // The algorithm has been taken straight from a TR1:
+  // "Library Extension Technical Report - Issue List" section 6.18.
+  // This is also the way Boost implements it.
+  size_t seed = 0;
+  for ( const auto &flag : flags )  {
+    seed ^= std::hash< std::string >()( flag ) + ( seed << 6 ) + ( seed >> 2 );
+  }
+  return seed;
 }
 
 }  // unnamed namespace
@@ -86,16 +90,16 @@ shared_ptr< TranslationUnit > TranslationUnitStore::GetOrCreate(
     filename_to_flags_hash_[ filename ] = HashForFlags( flags );
   }
 
-  boost::shared_ptr< TranslationUnit > unit;
+  shared_ptr< TranslationUnit > unit;
 
   try {
-    unit = boost::make_shared< TranslationUnit >( filename,
-                                                  unsaved_files,
-                                                  flags,
-                                                  clang_index_ );
-  } catch ( ClangParseError & ) {
+    unit = make_shared< TranslationUnit >( filename,
+                                           unsaved_files,
+                                           flags,
+                                           clang_index_ );
+  } catch ( const ClangParseError & ) {
     Remove( filename );
-    return unit;
+    throw;
   }
 
   {

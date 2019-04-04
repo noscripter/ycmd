@@ -26,48 +26,7 @@ cmake_minimum_required( VERSION 2.8 )
 
 project( BoostParts )
 
-set( Python_ADDITIONAL_VERSIONS 2.7 2.6 )
-find_package( PythonLibs 2.6 REQUIRED )
-
-if ( NOT PYTHONLIBS_VERSION_STRING VERSION_LESS "3.0.0" )
-  message( FATAL_ERROR
-    "CMake found python3 libs instead of python2 libs. YCM works only with "
-    "python2.\n" )
-endif()
-
 file( GLOB_RECURSE SOURCES *.cpp )
-
-# We need to remove all the thread cpp files and then add them on a per-platform
-# basis
-file( GLOB_RECURSE to_remove libs/thread/*.cpp libs/detail/*.cpp )
-
-if( to_remove )
-  list( REMOVE_ITEM SOURCES ${to_remove} )
-endif()
-
-set( COMMON_SOURCES
-    libs/thread/src/future.cpp
-    )
-
-set( WIN_SOURCES
-    libs/thread/src/win32/thread.cpp
-    libs/thread/src/win32/tss_dll.cpp
-    libs/thread/src/win32/tss_pe.cpp
-    )
-
-set( UNIX_SOURCES
-    libs/thread/src/pthread/once.cpp
-    libs/thread/src/pthread/once_atomic.cpp
-    libs/thread/src/pthread/thread.cpp
-    )
-
-list( APPEND SOURCES ${COMMON_SOURCES} )
-
-if ( WIN32 )
-    list( APPEND SOURCES ${WIN_SOURCES} )
-else()
-    list( APPEND SOURCES ${UNIX_SOURCES} )
-endif()
 
 #############################################################################
 
@@ -77,14 +36,16 @@ include_directories(
   ${PYTHON_INCLUDE_DIRS}
   )
 
-add_library( BoostParts ${SOURCES} )
+add_library( BoostParts STATIC ${SOURCES} )
 
 #############################################################################
 
+# No warnings. We just use Boost as is so warnings coming from it are just
+# noise.
 if( CMAKE_COMPILER_IS_GNUCXX OR COMPILER_IS_CLANG )
-  # No warnings. We just use Boost as is so warnings coming from it are just
-  # noise.
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
+  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w" )
+elseif( MSVC )
+  add_definitions( /W0 -D_SCL_SECURE_NO_WARNINGS )
 endif()
 
 #############################################################################

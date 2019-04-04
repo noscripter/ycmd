@@ -1,5 +1,6 @@
+# encoding: utf-8
 #
-# Copyright (C) 2015 ycmd contributors
+# Copyright (C) 2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -16,277 +17,191 @@
 # You should have received a copy of the GNU General Public License
 # along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import absolute_import
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
+
+from hamcrest import ( assert_that,
+                       contains,
+                       contains_inanyorder,
+                       has_entries,
+                       has_item,
+                       matches_regexp )
 from nose.tools import eq_
-from hamcrest import ( assert_that, contains, contains_inanyorder, empty,
-                       has_entries )
-from javascript_handlers_test import Javascript_Handlers_test
-from pprint import pformat
-import httplib
+import pprint
+import requests
 
-# The following properties/methods are in Object.prototype, so are present
-# on all objects:
-#
-# toString()
-# toLocaleString()
-# valueOf()
-# hasOwnProperty()
-# propertyIsEnumerable()
-# isPrototypeOf()
+from ycmd.tests.javascript import IsolatedYcmd, PathToTestFile, SharedYcmd
+from ycmd.tests.test_utils import ( BuildRequest, ChunkMatcher,
+                                    CompletionEntryMatcher, LocationMatcher )
+from ycmd.utils import ReadFile
 
 
-class Javascript_GetCompletions_test( Javascript_Handlers_test ):
+def RunTest( app, test ):
+  contents = ReadFile( test[ 'request' ][ 'filepath' ] )
 
-  def _RunTest( self, test ):
-    """
-    Method to run a simple completion test and verify the result
+  def CombineRequest( request, data ):
+    kw = request
+    request.update( data )
+    return BuildRequest( **kw )
 
-    test is a dictionary containing:
-      'request': kwargs for BuildRequest
-      'expect': {
-         'response': server response code (e.g. httplib.OK)
-         'data': matcher for the server response json
-      }
-    """
-
-    contents = open( test[ 'request' ][ 'filepath' ] ).read()
-
-    def CombineRequest( request, data ):
-      kw = request
-      request.update( data )
-      return self._BuildRequest( **kw )
-
-    self._app.post_json( '/event_notification',
-                         CombineRequest( test[ 'request' ], {
-                                         'event_name': 'FileReadyToParse',
-                                         'contents': contents,
-                                         } ),
-                         expect_errors = True )
-
-    # We ignore errors here and we check the response code ourself.
-    # This is to allow testing of requests returning errors.
-    response = self._app.post_json( '/completions',
-                                    CombineRequest( test[ 'request' ], {
-                                      'contents': contents
-                                    } ),
-                                    expect_errors = True )
-
-    print( 'completer response: {0}'.format( pformat( response.json ) ) )
-
-    eq_( response.status_code, test[ 'expect' ][ 'response' ] )
-
-    assert_that( response.json, test[ 'expect' ][ 'data' ] )
-
-
-  def NoQuery_test( self ):
-    self._RunTest( {
-      'description': 'semantic completion works for simple object no query',
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'simple_test.js' ),
-        'line_num'  : 13,
-        'column_num': 43,
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains_inanyorder(
-            self._CompletionEntryMatcher( 'a_simple_function',
-                                          'fn(param: ?) -> string' ),
-            self._CompletionEntryMatcher( 'basic_type', 'number' ),
-            self._CompletionEntryMatcher( 'object', 'object' ),
-            self._CompletionEntryMatcher( 'toString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'toLocaleString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'valueOf', 'fn() -> number' ),
-            self._CompletionEntryMatcher( 'hasOwnProperty',
-                                          'fn(prop: string) -> bool' ),
-            self._CompletionEntryMatcher( 'isPrototypeOf',
-                                          'fn(obj: ?) -> bool' ),
-            self._CompletionEntryMatcher( 'propertyIsEnumerable',
-                                          'fn(prop: string) -> bool' ),
-          ),
-          'errors': empty(),
-        } )
-      },
+  app.post_json(
+    '/event_notification',
+    CombineRequest( test[ 'request' ], {
+      'contents': contents,
+      'filetype': 'javascript',
+      'event_name': 'BufferVisit'
     } )
+  )
 
-
-  def Query_test( self ):
-    self._RunTest( {
-      'description': 'semantic completion works for simple object with query',
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'simple_test.js' ),
-        'line_num'  : 14,
-        'column_num': 45,
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains(
-            self._CompletionEntryMatcher( 'basic_type', 'number' ),
-            self._CompletionEntryMatcher( 'isPrototypeOf',
-                                          'fn(obj: ?) -> bool' ),
-          ),
-          'errors': empty(),
-        } )
-      },
+  response = app.post_json(
+    '/completions',
+    CombineRequest( test[ 'request' ], {
+      'contents': contents,
+      'filetype': 'javascript',
+      'force_semantic': True
     } )
+  )
+
+  print( 'completer response: {0}'.format( pprint.pformat( response.json ) ) )
+
+  eq_( response.status_code, test[ 'expect' ][ 'response' ] )
+
+  assert_that( response.json, test[ 'expect' ][ 'data' ] )
 
 
-  def Require_NoQuery_test( self ):
-    self._RunTest( {
-      'description': 'semantic completion works for simple object no query',
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'requirejs_test.js' ),
-        'line_num'  : 2,
-        'column_num': 15,
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains_inanyorder(
-            self._CompletionEntryMatcher( 'mine_bitcoin',
-                                          'fn(how_much: ?) -> number' ),
-            self._CompletionEntryMatcher( 'get_number', 'number' ),
-            self._CompletionEntryMatcher( 'get_string', 'string' ),
-            self._CompletionEntryMatcher( 'get_thing',
-                                          'fn(a: ?) -> number|string' ),
-            self._CompletionEntryMatcher( 'toString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'toLocaleString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'valueOf', 'fn() -> number' ),
-            self._CompletionEntryMatcher( 'hasOwnProperty',
-                                          'fn(prop: string) -> bool' ),
-            self._CompletionEntryMatcher( 'isPrototypeOf',
-                                          'fn(obj: ?) -> bool' ),
-            self._CompletionEntryMatcher( 'propertyIsEnumerable',
-                                          'fn(prop: string) -> bool' ),
+@SharedYcmd
+def GetCompletions_Basic_test( app ):
+  RunTest( app, {
+    'description': 'Extra and detailed info when completions are methods',
+    'request': {
+      'line_num': 14,
+      'column_num': 6,
+      'filepath': PathToTestFile( 'test.js' )
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': contains_inanyorder(
+          CompletionEntryMatcher(
+            'methodA',
+            '(method) Foo.methodA(): void',
+            extra_params = {
+              'kind': 'method',
+              'detailed_info': '(method) Foo.methodA(): void\n\n'
+                               'Unicode string: 说话'
+            }
           ),
-          'errors': empty(),
-        } )
-      },
-    } )
-
-
-  def Require_Query_test( self ):
-    self._RunTest( {
-      'description': 'semantic completion works for require object with query',
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'requirejs_test.js' ),
-        'line_num'  : 3,
-        'column_num': 17,
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains(
-            self._CompletionEntryMatcher( 'mine_bitcoin',
-                                          'fn(how_much: ?) -> number' ),
+          CompletionEntryMatcher(
+            'methodB',
+            '(method) Foo.methodB(): void',
+            extra_params = {
+              'kind': 'method',
+              'detailed_info': '(method) Foo.methodB(): void'
+            }
           ),
-          'errors': empty(),
+          CompletionEntryMatcher(
+            'methodC',
+            '(method) Foo.methodC(foo: any, bar: any): void',
+            extra_params = {
+              'kind': 'method',
+              'detailed_info': '(method) Foo.methodC(foo: any, bar: any): void'
+            }
+          )
+        )
+      } )
+    }
+  } )
+
+
+@SharedYcmd
+def GetCompletions_Keyword_test( app ):
+  RunTest( app, {
+    'description': 'No extra and detailed info when completion is a keyword',
+    'request': {
+      'line_num': 1,
+      'column_num': 5,
+      'filepath': PathToTestFile( 'test.js' ),
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': has_item( {
+          'insertion_text': 'class',
+          'kind':           'keyword',
+          'extra_data':     {}
         } )
-      },
-    } )
+      } )
+    }
+  } )
 
 
-  def Require_Query_LCS_test( self ):
-    self._RunTest( {
-      'description': ( 'completion works for require object '
-                       'with query not prefix' ),
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'requirejs_test.js' ),
-        'line_num'  : 4,
-        'column_num': 17,
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains(
-            self._CompletionEntryMatcher( 'get_number', 'number' ),
-            self._CompletionEntryMatcher( 'get_thing',
-                                          'fn(a: ?) -> number|string' ),
-            self._CompletionEntryMatcher( 'get_string', 'string' ),
-          ),
-          'errors': empty(),
-        } )
-      },
-    } )
+@SharedYcmd
+def GetCompletions_AutoImport_test( app ):
+  filepath = PathToTestFile( 'test.js' )
+  RunTest( app, {
+    'description': 'Symbol from external module can be completed and '
+                   'its completion contains fixits to automatically import it',
+    'request': {
+      'line_num': 36,
+      'column_num': 5,
+      'filepath': filepath,
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': has_item( has_entries( {
+          'insertion_text':  'Bår',
+          'extra_menu_info': 'class Bår',
+          'detailed_info':   'class Bår',
+          'kind':            'class',
+          'extra_data': has_entries( {
+            'fixits': contains_inanyorder(
+              has_entries( {
+                'text': 'Import \'Bår\' from module "./unicode"',
+                'chunks': contains(
+                  ChunkMatcher(
+                    matches_regexp( '^import { Bår } from "./unicode";\r?\n'
+                                    '\r?\n' ),
+                    LocationMatcher( filepath, 1, 1 ),
+                    LocationMatcher( filepath, 1, 1 )
+                  )
+                ),
+                'location': LocationMatcher( filepath, 36, 5 )
+              } )
+            )
+          } )
+        } ) )
+      } )
+    }
+  } )
 
 
-  def DirtyNamedBuffers_test( self ):
-    # This tests that when we have dirty buffers in our editor, tern actually
-    # uses them correctly
-    self._RunTest( {
-      'description': ( 'completion works for require object '
-                       'with query not prefix' ),
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'requirejs_test.js' ),
-        'line_num'  : 18,
-        'column_num': 11,
-        'file_data': {
-          self._PathToTestFile( 'no_such_lib', 'no_such_file.js' ): {
-            'contents': (
-              'define( [], function() { return { big_endian_node: 1 } } )' ),
-            'filetypes': [ 'javascript' ]
-          }
-        },
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains_inanyorder(
-            self._CompletionEntryMatcher( 'big_endian_node', 'number' ),
-            self._CompletionEntryMatcher( 'toString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'toLocaleString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'valueOf', 'fn() -> number' ),
-            self._CompletionEntryMatcher( 'hasOwnProperty',
-                                          'fn(prop: string) -> bool' ),
-            self._CompletionEntryMatcher( 'isPrototypeOf',
-                                          'fn(obj: ?) -> bool' ),
-            self._CompletionEntryMatcher( 'propertyIsEnumerable',
-                                          'fn(prop: string) -> bool' ),
-          ),
-          'errors': empty(),
-        } )
-      },
-    } )
-
-
-  def ReturnsDocsInCompletions_test( self ):
-    # This tests that we supply docs for completions
-    self._RunTest( {
-      'description': 'completions supply docs',
-      'request': {
-        'filetype'  : 'javascript',
-        'filepath'  : self._PathToTestFile( 'requirejs_test.js' ),
-        'line_num'  : 8,
-        'column_num': 15,
-      },
-      'expect': {
-        'response': httplib.OK,
-        'data': has_entries( {
-          'completions': contains_inanyorder(
-            self._CompletionEntryMatcher(
-              'a_function',
-              'fn(bar: ?) -> {a_value: string}', {
-                'detailed_info': ( 'fn(bar: ?) -> {a_value: string}\n'
-                                   'This is a short documentation string'),
-              } ),
-            self._CompletionEntryMatcher( 'options', 'options' ),
-            self._CompletionEntryMatcher( 'toString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'toLocaleString', 'fn() -> string' ),
-            self._CompletionEntryMatcher( 'valueOf', 'fn() -> number' ),
-            self._CompletionEntryMatcher( 'hasOwnProperty',
-                                          'fn(prop: string) -> bool' ),
-            self._CompletionEntryMatcher( 'isPrototypeOf',
-                                          'fn(obj: ?) -> bool' ),
-            self._CompletionEntryMatcher( 'propertyIsEnumerable',
-                                          'fn(prop: string) -> bool' ),
-          ),
-          'errors': empty(),
-        } )
-      },
-    } )
+@IsolatedYcmd
+def GetCompletions_IgnoreIdentifiers_test( app ):
+  RunTest( app, {
+    'description': 'Identifier "test" is not returned as a suggestion',
+    'request': {
+      'line_num': 5,
+      'column_num': 6,
+      'filepath': PathToTestFile( 'identifier', 'test.js' ),
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': contains(
+          CompletionEntryMatcher(
+            'foo',
+            '(property) foo: string',
+            extra_params = {
+              'kind': 'property',
+              'detailed_info': '(property) foo: string'
+            }
+          )
+        )
+      } )
+    }
+  } )

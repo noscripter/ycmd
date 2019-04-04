@@ -1,31 +1,36 @@
-#!/usr/bin/env python
+# Copyright (C) 2014 Google Inc.
 #
-# Copyright (C) 2014  Google Inc.
+# This file is part of ycmd.
 #
-# This file is part of YouCompleteMe.
-#
-# YouCompleteMe is free software: you can redistribute it and/or modify
+# ycmd is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# YouCompleteMe is distributed in the hope that it will be useful,
+# ycmd is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+# along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
+
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
 
 from ycmd.responses import ServerError
+
 
 # Throws an exception if request doesn't have all the required fields.
 # TODO: Accept a request_type param so that we can also verify missing
 # command_arguments and completer_target fields if necessary.
 def EnsureRequestValid( request_json ):
-  required_fields = set(
-      [ 'line_num', 'column_num', 'filepath', 'file_data' ] )
-  missing = set( x for x in required_fields if x not in request_json )
+  required_fields = { 'line_num', 'column_num', 'filepath', 'file_data' }
+  missing = { x for x in required_fields if x not in request_json }
 
   if 'filepath' not in missing and 'file_data' not in missing:
     missing.update( _MissingFieldsForFileData( request_json ) )

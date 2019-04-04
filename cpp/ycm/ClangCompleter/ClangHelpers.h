@@ -1,36 +1,35 @@
-// Copyright (C) 2013  Google Inc.
+// Copyright (C) 2013-2018 ycmd contributors
 //
-// This file is part of YouCompleteMe.
+// This file is part of ycmd.
 //
-// YouCompleteMe is free software: you can redistribute it and/or modify
+// ycmd is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// YouCompleteMe is distributed in the hope that it will be useful,
+// ycmd is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+// along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef CLANGHELPERS_H_T3ME71LG
 #define CLANGHELPERS_H_T3ME71LG
 
-#include "Diagnostic.h"
 #include "CompletionData.h"
+#include "Diagnostic.h"
 #include "UnsavedFile.h"
 
-#include <vector>
 #include <clang-c/Index.h>
-#include <boost/shared_ptr.hpp>
-#include <boost/type_traits/remove_pointer.hpp>
+#include <memory>
+#include <vector>
 
 namespace YouCompleteMe {
 
-typedef boost::shared_ptr <
-boost::remove_pointer< CXDiagnostic >::type > DiagnosticWrap;
+using DiagnosticWrap =
+  std::shared_ptr< std::remove_pointer< CXDiagnostic >::type >;
 
 std::vector< CompletionData > ToCompletionDataVector(
   CXCodeCompleteResults *results );
@@ -40,7 +39,7 @@ std::vector< CompletionData > ToCompletionDataVector(
 std::vector< CXUnsavedFile > ToCXUnsavedFiles(
   const std::vector< UnsavedFile > &unsaved_files );
 
-Diagnostic BuildDiagnostic( DiagnosticWrap diagnostic_wrap,
+Diagnostic BuildDiagnostic( const DiagnosticWrap &diagnostic_wrap,
                             CXTranslationUnit translation_unit );
 
 } // namespace YouCompleteMe

@@ -1,19 +1,19 @@
-// Copyright (C) 2011, 2012  Google Inc.
+// Copyright (C) 2011, 2012 Google Inc.
 //
-// This file is part of YouCompleteMe.
+// This file is part of ycmd.
 //
-// YouCompleteMe is free software: you can redistribute it and/or modify
+// ycmd is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// YouCompleteMe is distributed in the hope that it will be useful,
+// ycmd is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+// along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IdentifierUtils.h"
 #include "TestUtils.h"
@@ -29,6 +29,8 @@ namespace fs = boost::filesystem;
 using ::testing::ElementsAre;
 using ::testing::ContainerEq;
 using ::testing::WhenSorted;
+using ::testing::Pair;
+using ::testing::UnorderedElementsAre;
 
 
 TEST( IdentifierUtilsTest, ExtractIdentifiersFromTagsFileWorks ) {
@@ -36,23 +38,59 @@ TEST( IdentifierUtilsTest, ExtractIdentifiersFromTagsFileWorks ) {
   fs::path testfile = PathToTestFile( "basic.tags" );
   fs::path testfile_parent = testfile.parent_path();
 
-  FiletypeIdentifierMap expected;
-  expected[ "cpp" ][ ( testfile_parent / "foo" ).string() ]
-  .push_back( "i1" );
-  expected[ "cpp" ][ ( testfile_parent / "bar" ).string() ]
-  .push_back( "i1" );
-  expected[ "cpp" ][ ( testfile_parent / "foo" ).string() ]
-  .push_back( "foosy" );
-  expected[ "cpp" ][ ( testfile_parent / "bar" ).string() ]
-  .push_back( "fooaaa" );
+  EXPECT_THAT( ExtractIdentifiersFromTagsFile( testfile ),
+      UnorderedElementsAre(
+        Pair( "cpp", UnorderedElementsAre(
+                         Pair( ( testfile_parent / "foo" ).string(),
+                               ElementsAre( "i1", "foosy" ) ),
+                         Pair( ( testfile_parent / "bar" ).string(),
+                               ElementsAre( "i1", "fooaaa" ) ) ) ),
+        Pair( "fakelang", UnorderedElementsAre(
+                              Pair( ( root / "foo" ).string(),
+                                    ElementsAre( "zoro" ) ) ) ),
+        Pair( "cs", UnorderedElementsAre(
+                        Pair( ( root / "m_oo" ).string(),
+                              ElementsAre( "#bleh" ) ) ) ),
+        Pair( "foobar", UnorderedElementsAre(
+                            Pair( ( testfile_parent / "foo.bar" ).string(),
+                                  ElementsAre( "API", "DELETE" ) ) ) ),
+        Pair( "c", UnorderedElementsAre(
+                       Pair( ( root / "foo" / "zoo" ).string(),
+                             ElementsAre( "Floo::goo" ) ),
+                       Pair( ( root / "foo" / "goo maa" ).string(),
+                             ElementsAre( "!goo" ) ) ) ) ) );
+}
 
-  expected[ "c" ][ ( root / "foo" / "zoo" ).string() ].push_back( "Floo::goo" );
-  expected[ "c" ][ ( root / "foo" / "goo maa" ).string() ].push_back( "!goo" );
 
-  expected[ "cs" ][ ( root / "m_oo" ).string() ].push_back( "#bleh" );
+TEST( IdentifierUtilsTest, TagFileIsDirectory ) {
+  fs::path testfile = PathToTestFile( "directory.tags" );
 
   EXPECT_THAT( ExtractIdentifiersFromTagsFile( testfile ),
-               ContainerEq( expected ) );
+               ContainerEq( FiletypeIdentifierMap() ) );
+}
+
+
+TEST( IdentifierUtilsTest, TagFileIsEmpty ) {
+  fs::path testfile = PathToTestFile( "empty.tags" );
+
+  EXPECT_THAT( ExtractIdentifiersFromTagsFile( testfile ),
+               ContainerEq( FiletypeIdentifierMap() ) );
+}
+
+
+TEST( IdentifierUtilsTest, TagLanguageMissing ) {
+  fs::path testfile = PathToTestFile( "invalid_tag_file_format.tags" );
+
+  EXPECT_THAT( ExtractIdentifiersFromTagsFile( testfile ),
+               ContainerEq( FiletypeIdentifierMap() ) );
+}
+
+
+TEST( IdentifierUtilsTest, TagFileInvalidPath ) {
+  fs::path testfile = PathToTestFile( "invalid_path_to_tag_file.tags" );
+
+  EXPECT_THAT( ExtractIdentifiersFromTagsFile( testfile ),
+               ContainerEq( FiletypeIdentifierMap() ) );
 }
 
 } // namespace YouCompleteMe

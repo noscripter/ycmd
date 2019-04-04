@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-#
 # Copyright (C) 2013 Google Inc.
 #               2015 ycmd contributors
 #
@@ -18,27 +16,41 @@
 # You should have received a copy of the GNU General Public License
 # along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
+
+from mock import patch
 from nose.tools import eq_
-from .handlers_test import Handlers_test
+
+from ycmd.tests import SharedYcmd
+from ycmd.tests.test_utils import BuildRequest, DummyCompleter, PatchCompleter
 
 
-class Subcommands_test( Handlers_test ):
+@SharedYcmd
+@patch( 'ycmd.tests.test_utils.DummyCompleter.GetSubcommandsMap',
+        return_value = { 'A': lambda x: x,
+                         'B': lambda x: x,
+                         'C': lambda x: x } )
+def Subcommands_Basic_test( app, *args ):
+  with PatchCompleter( DummyCompleter, 'dummy_filetype' ):
+    subcommands_data = BuildRequest( completer_target = 'dummy_filetype' )
 
-  def Basic_test( self ):
-    subcommands_data = self._BuildRequest( completer_target = 'python' )
-
-    eq_( [ 'GetDoc',
-           'GoTo',
-           'GoToDeclaration',
-           'GoToDefinition' ],
-         self._app.post_json( '/defined_subcommands', subcommands_data ).json )
+    eq_( [ 'A', 'B', 'C' ],
+         app.post_json( '/defined_subcommands', subcommands_data ).json )
 
 
-  def NoExplicitCompleterTargetSpecified_test( self ):
-    subcommands_data = self._BuildRequest( filetype = 'python' )
+@SharedYcmd
+@patch( 'ycmd.tests.test_utils.DummyCompleter.GetSubcommandsMap',
+        return_value = { 'A': lambda x: x,
+                         'B': lambda x: x,
+                         'C': lambda x: x } )
+def Subcommands_NoExplicitCompleterTargetSpecified_test( app, *args ):
+  with PatchCompleter( DummyCompleter, 'dummy_filetype' ):
+    subcommands_data = BuildRequest( filetype = 'dummy_filetype' )
 
-    eq_( [ 'GetDoc',
-           'GoTo',
-           'GoToDeclaration',
-           'GoToDefinition' ],
-         self._app.post_json( '/defined_subcommands', subcommands_data ).json )
+    eq_( [ 'A', 'B', 'C' ],
+         app.post_json( '/defined_subcommands', subcommands_data ).json )

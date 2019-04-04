@@ -1,38 +1,34 @@
-// Copyright (C) 2011-2013  Google Inc.
+// Copyright (C) 2011-2018 ycmd contributors
 //
-// This file is part of YouCompleteMe.
+// This file is part of ycmd.
 //
-// YouCompleteMe is free software: you can redistribute it and/or modify
+// ycmd is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// YouCompleteMe is distributed in the hope that it will be useful,
+// ycmd is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+// along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ClangCompleter.h"
-#include "exceptions.h"
-#include "Result.h"
 #include "Candidate.h"
-#include "TranslationUnit.h"
-#include "standard.h"
 #include "CandidateRepository.h"
-#include "CompletionData.h"
-#include "Utils.h"
 #include "ClangUtils.h"
-#include "ReleaseGil.h"
+#include "CompletionData.h"
+#include "Result.h"
+#include "TranslationUnit.h"
+#include "Utils.h"
 
 #include <clang-c/Index.h>
-#include <boost/shared_ptr.hpp>
+#include <memory>
 
 
-using boost::shared_ptr;
-using boost::unordered_map;
+using std::shared_ptr;
 
 namespace YouCompleteMe {
 
@@ -60,11 +56,11 @@ ClangCompleter::~ClangCompleter() {
 
 
 bool ClangCompleter::UpdatingTranslationUnit( const std::string &filename ) {
-  ReleaseGil unlock;
   shared_ptr< TranslationUnit > unit = translation_unit_store_.Get( filename );
 
-  if ( !unit )
+  if ( !unit ) {
     return false;
+  }
 
   // Thankfully, an invalid, sentinel TU always returns true for
   // IsCurrentlyUpdating, so no caller will try to rely on the TU object, even
@@ -74,98 +70,111 @@ bool ClangCompleter::UpdatingTranslationUnit( const std::string &filename ) {
 
 
 std::vector< Diagnostic > ClangCompleter::UpdateTranslationUnit(
-  const std::string &filename,
+  const std::string &translation_unit,
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags ) {
-  ReleaseGil unlock;
   bool translation_unit_created;
   shared_ptr< TranslationUnit > unit = translation_unit_store_.GetOrCreate(
-                                         filename,
+                                         translation_unit,
                                          unsaved_files,
                                          flags,
                                          translation_unit_created );
 
-  if ( !unit )
-    return std::vector< Diagnostic >();
-
   try {
-    // There's no point in reparsing a TU that was just created, it was just
-    // parsed in the TU constructor
-    if ( !translation_unit_created )
-      return unit->Reparse( unsaved_files );
-
-    return unit->LatestDiagnostics();
-  }
-
-  catch ( ClangParseError & ) {
+    return unit->Reparse( unsaved_files );
+  } catch ( const ClangParseError & ) {
     // If unit->Reparse fails, then the underlying TranslationUnit object is not
     // valid anymore and needs to be destroyed and removed from the filename ->
     // TU map.
-    translation_unit_store_.Remove( filename );
+    translation_unit_store_.Remove( translation_unit );
+    throw;
   }
-
-  return std::vector< Diagnostic >();
 }
 
 
 std::vector< CompletionData >
 ClangCompleter::CandidatesForLocationInFile(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags ) {
-  ReleaseGil unlock;
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit )
-    return std::vector< CompletionData >();
-
-  return unit->CandidatesForLocation( line,
+  return unit->CandidatesForLocation( filename,
+                                      line,
                                       column,
                                       unsaved_files );
 }
 
 
 Location ClangCompleter::GetDeclarationLocation(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags,
   bool reparse ) {
-  ReleaseGil unlock;
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit ) {
-    return Location();
-  }
-
-  return unit->GetDeclarationLocation( line, column, unsaved_files, reparse );
+  return unit->GetDeclarationLocation( filename,
+                                       line,
+                                       column,
+                                       unsaved_files,
+                                       reparse );
 }
 
 
 Location ClangCompleter::GetDefinitionLocation(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags,
   bool reparse ) {
-  ReleaseGil unlock;
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit ) {
-    return Location();
-  }
+  return unit->GetDefinitionLocation( filename,
+                                      line,
+                                      column,
+                                      unsaved_files,
+                                      reparse );
+}
 
-  return unit->GetDefinitionLocation( line, column, unsaved_files, reparse );
+Location ClangCompleter::GetDefinitionOrDeclarationLocation(
+  const std::string &translation_unit,
+  const std::string &filename,
+  int line,
+  int column,
+  const std::vector< UnsavedFile > &unsaved_files,
+  const std::vector< std::string > &flags,
+  bool reparse ) {
+  shared_ptr< TranslationUnit > unit =
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
+
+  return unit->GetDefinitionOrDeclarationLocation( filename,
+                                                   line,
+                                                   column,
+                                                   unsaved_files,
+                                                   reparse );
 }
 
 std::string ClangCompleter::GetTypeAtLocation(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
@@ -173,18 +182,20 @@ std::string ClangCompleter::GetTypeAtLocation(
   const std::vector< std::string > &flags,
   bool reparse ) {
 
-  ReleaseGil unlock;
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit ) {
-    return "no unit";
-  }
-
-  return unit->GetTypeAtLocation( line, column, unsaved_files, reparse );
+  return unit->GetTypeAtLocation( filename,
+                                  line,
+                                  column,
+                                  unsaved_files,
+                                  reparse );
 }
 
 std::string ClangCompleter::GetEnclosingFunctionAtLocation(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
@@ -192,15 +203,13 @@ std::string ClangCompleter::GetEnclosingFunctionAtLocation(
   const std::vector< std::string > &flags,
   bool reparse ) {
 
-  ReleaseGil unlock;
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit ) {
-    return "no unit";
-  }
-
-  return unit->GetEnclosingFunctionAtLocation( line,
+  return unit->GetEnclosingFunctionAtLocation( filename,
+                                               line,
                                                column,
                                                unsaved_files,
                                                reparse );
@@ -208,23 +217,22 @@ std::string ClangCompleter::GetEnclosingFunctionAtLocation(
 
 std::vector< FixIt >
 ClangCompleter::GetFixItsForLocationInFile(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags,
-  bool reparse) {
+  bool reparse ) {
 
-  ReleaseGil unlock;
 
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit ) {
-    return std::vector< FixIt >();
-  }
-
-  return unit->GetFixItsForLocationInFile( line,
+  return unit->GetFixItsForLocationInFile( filename,
+                                           line,
                                            column,
                                            unsaved_files,
                                            reparse );
@@ -232,31 +240,43 @@ ClangCompleter::GetFixItsForLocationInFile(
 }
 
 DocumentationData ClangCompleter::GetDocsForLocationInFile(
+  const std::string &translation_unit,
   const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags,
-  bool reparse) {
+  bool reparse ) {
 
-  ReleaseGil unlock;
 
   shared_ptr< TranslationUnit > unit =
-    translation_unit_store_.GetOrCreate( filename, unsaved_files, flags );
+    translation_unit_store_.GetOrCreate( translation_unit,
+                                         unsaved_files,
+                                         flags );
 
-  if ( !unit ) {
-    return DocumentationData();
+  Location location( unit->GetDeclarationLocation( filename,
+                                                   line,
+                                                   column,
+                                                   unsaved_files,
+                                                   reparse ) );
+  // By default, libclang ignores comments from system headers and, in
+  // particular, headers included with the -isystem flag. If the declaration is
+  // found in such header, get the documentation directly from the corresponding
+  // translation unit. Comments in the main file of a translation unit are not
+  // ignored.
+  if ( unit->LocationIsInSystemHeader( location ) ) {
+    unit = translation_unit_store_.GetOrCreate( location.filename_,
+                                                unsaved_files,
+                                                flags );
+    return unit->GetDocsForLocation( location, unsaved_files, reparse );
   }
 
-  return unit->GetDocsForLocationInFile( line,
-                                         column,
-                                         unsaved_files,
-                                         reparse );
-
+  // This translation unit has already been parsed when getting the
+  // declaration's location.
+  return unit->GetDocsForLocation( location, unsaved_files, false );
 }
 
 void ClangCompleter::DeleteCachesForFile( const std::string &filename ) {
-  ReleaseGil unlock;
   translation_unit_store_.Remove( filename );
 }
 

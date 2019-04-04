@@ -1,32 +1,30 @@
-// Copyright (C) 2013  Google Inc.
+// Copyright (C) 2013-2018 ycmd contributors
 //
-// This file is part of YouCompleteMe.
+// This file is part of ycmd.
 //
-// YouCompleteMe is free software: you can redistribute it and/or modify
+// ycmd is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// YouCompleteMe is distributed in the hope that it will be useful,
+// ycmd is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+// along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef IDENTIFIERDATABASE_H_ZESX3CVR
 #define IDENTIFIERDATABASE_H_ZESX3CVR
 
-#include <boost/utility.hpp>
-#include <boost/unordered_map.hpp>
-#include <boost/thread/mutex.hpp>
-#include <boost/shared_ptr.hpp>
-
-#include <vector>
-#include <string>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace YouCompleteMe {
 
@@ -36,12 +34,11 @@ class CandidateRepository;
 
 
 // filepath -> identifiers
-typedef std::map< std::string, std::vector< std::string > >
-FilepathToIdentifiers;
+using FilepathToIdentifiers = std::map< std::string,
+                                        std::vector< std::string > >;
 
 // filetype -> (filepath -> identifiers)
-typedef std::map< std::string, FilepathToIdentifiers >
-FiletypeIdentifierMap;
+using FiletypeIdentifierMap = std::map< std::string, FilepathToIdentifiers >;
 
 
 // This class stores the database of identifiers the identifier completer has
@@ -53,9 +50,11 @@ FiletypeIdentifierMap;
 // mutexes are used correctly to protect concurrent access.
 //
 // This class is thread-safe.
-class IdentifierDatabase : boost::noncopyable {
+class IdentifierDatabase {
 public:
-  IdentifierDatabase();
+  YCM_EXPORT IdentifierDatabase();
+  IdentifierDatabase( const IdentifierDatabase& ) = delete;
+  IdentifierDatabase& operator=( const IdentifierDatabase& ) = delete;
 
   void AddIdentifiers( const FiletypeIdentifierMap &filetype_identifier_map );
 
@@ -69,7 +68,8 @@ public:
 
   void ResultsForQueryAndType( const std::string &query,
                                const std::string &filetype,
-                               std::vector< Result > &results ) const;
+                               std::vector< Result > &results,
+                               const size_t max_results ) const;
 
 private:
   std::set< const Candidate * > &GetCandidateSet(
@@ -83,19 +83,19 @@ private:
 
 
   // filepath -> *( *candidate )
-  typedef boost::unordered_map < std::string,
-          boost::shared_ptr< std::set< const Candidate * > > >
-          FilepathToCandidates;
+  using FilepathToCandidates =
+    std::unordered_map < std::string,
+                         std::shared_ptr< std::set< const Candidate * > > >;
 
   // filetype -> *( filepath -> *( *candidate ) )
-  typedef boost::unordered_map < std::string,
-          boost::shared_ptr< FilepathToCandidates > > FiletypeCandidateMap;
+  using FiletypeCandidateMap =
+    std::unordered_map < std::string, std::shared_ptr< FilepathToCandidates > >;
 
 
   CandidateRepository &candidate_repository_;
 
   FiletypeCandidateMap filetype_candidate_map_;
-  mutable boost::mutex filetype_candidate_map_mutex_;
+  mutable std::mutex filetype_candidate_map_mutex_;
 };
 
 } // namespace YouCompleteMe

@@ -1,53 +1,101 @@
-#!/usr/bin/env python
+# Copyright (C) 2013-2018 ycmd contributors
 #
-# Copyright (C) 2013  Google Inc.
+# This file is part of ycmd.
 #
-# This file is part of YouCompleteMe.
-#
-# YouCompleteMe is free software: you can redistribute it and/or modify
+# ycmd is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# YouCompleteMe is distributed in the hope that it will be useful,
+# ycmd is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
+# along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
+from __future__ import unicode_literals
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+# Not installing aliases from python-future; it's unreliable and slow.
+from builtins import *  # noqa
+
+# Must not import ycm_core here! Vim imports completer, which imports this file.
+# We don't want ycm_core inside Vim.
 from collections import defaultdict
-import os
-import re
+from future.utils import iteritems
+from ycmd.utils import ( LOGGER, ToCppStringCompatible, ToUnicode, re, ReadFile,
+                         SplitLines )
 
 
 class PreparedTriggers( object ):
-  def __init__( self,  user_trigger_map = None, filetype_set = None ):
+  def __init__( self, user_trigger_map = None, filetype_set = None ):
+    self._user_trigger_map = user_trigger_map
+    self._server_trigger_map = None
+    self._filetype_set = filetype_set
+
+    self._CombineTriggers()
+
+
+  def _CombineTriggers( self ):
     user_prepared_triggers = ( _FiletypeTriggerDictFromSpec(
-        dict( user_trigger_map ) ) if user_trigger_map else
-        defaultdict( set ) )
+      dict( self._user_trigger_map ) ) if self._user_trigger_map else
+      defaultdict( set ) )
+    server_prepared_triggers = ( _FiletypeTriggerDictFromSpec(
+      dict( self._server_trigger_map ) ) if self._server_trigger_map else
+      defaultdict( set ) )
+
+    # Combine all of the defaults, server-supplied and user-supplied triggers
     final_triggers = _FiletypeDictUnion( PREPARED_DEFAULT_FILETYPE_TRIGGERS,
+                                         server_prepared_triggers,
                                          user_prepared_triggers )
-    if filetype_set:
-      final_triggers = dict( ( k, v ) for k, v in final_triggers.iteritems()
-                             if k in filetype_set )
+
+    if self._filetype_set:
+      final_triggers = { k: v for k, v in iteritems( final_triggers )
+                         if k in self._filetype_set }
 
     self._filetype_to_prepared_triggers = final_triggers
 
 
-  def MatchesForFiletype( self, current_line, start_column, filetype ):
+  def SetServerSemanticTriggers( self, server_trigger_characters ):
+    self._server_trigger_map = {
+      ','.join( self._filetype_set ): server_trigger_characters
+    }
+    self._CombineTriggers()
+
+
+  def MatchingTriggerForFiletype( self,
+                                  current_line,
+                                  start_codepoint,
+                                  column_codepoint,
+                                  filetype ):
     try:
       triggers = self._filetype_to_prepared_triggers[ filetype ]
     except KeyError:
-      return False
-    return _MatchesSemanticTrigger( current_line, start_column, triggers )
+      return None
+    return _MatchingSemanticTrigger( current_line,
+                                     start_codepoint,
+                                     column_codepoint,
+                                     triggers )
+
+
+  def MatchesForFiletype( self,
+                          current_line,
+                          start_codepoint,
+                          column_codepoint,
+                          filetype ):
+    return self.MatchingTriggerForFiletype( current_line,
+                                            start_codepoint,
+                                            column_codepoint,
+                                            filetype ) is not None
 
 
 def _FiletypeTriggerDictFromSpec( trigger_dict_spec ):
   triggers_for_filetype = defaultdict( set )
 
-  for key, triggers in trigger_dict_spec.iteritems():
+  for key, triggers in iteritems( trigger_dict_spec ):
     filetypes = key.split( ',' )
     for filetype in filetypes:
       regexes = [ _PrepareTrigger( x ) for x in triggers ]
@@ -57,126 +105,151 @@ def _FiletypeTriggerDictFromSpec( trigger_dict_spec ):
   return triggers_for_filetype
 
 
-def _FiletypeDictUnion( dict_one, dict_two ):
+def _FiletypeDictUnion( *args ):
   """Returns a new filetype dict that's a union of the provided two dicts.
   Dict params are supposed to be type defaultdict(set)."""
   def UpdateDict( first, second ):
-    for key, value in second.iteritems():
+    for key, value in iteritems( second ):
       first[ key ].update( value )
 
   final_dict = defaultdict( set )
-  UpdateDict( final_dict, dict_one )
-  UpdateDict( final_dict, dict_two )
+  for d in args:
+    UpdateDict( final_dict, d )
   return final_dict
 
 
-def _StringTriggerMatches( trigger, line_value, start_column ):
-  index = -1
-  trigger_length = len( trigger )
-  while True:
-    line_index = start_column + index
-    if line_index < 0 or line_value[ line_index ] != trigger[ index ]:
-      break
-
-    if abs( index ) == trigger_length:
-      return True
-    index -= 1
-  return False
-
-
-def _RegexTriggerMatches( trigger, line_value, start_column ):
+# start_codepoint and column_codepoint are codepoint offsets in the unicode
+# string line_value.
+def _RegexTriggerMatches( trigger,
+                          line_value,
+                          start_codepoint,
+                          column_codepoint ):
   for match in trigger.finditer( line_value ):
-    if match.end() == start_column:
+    # By definition of 'start_codepoint', we know that the character just before
+    # 'start_codepoint' is not an identifier character but all characters
+    # between 'start_codepoint' and 'column_codepoint' are. This means that if
+    # our trigger ends with an identifier character, its tail must match between
+    # 'start_codepoint' and 'column_codepoint', 'start_codepoint' excluded. But
+    # if it doesn't, its tail must match exactly at 'start_codepoint'. Both
+    # cases are mutually exclusive hence the following condition.
+    if start_codepoint <= match.end() and match.end() <= column_codepoint:
       return True
   return False
 
 
-# start_column is 0-based
-def _MatchesSemanticTrigger( line_value, start_column, trigger_list ):
+# start_codepoint and column_codepoint are 0-based and are codepoint offsets
+# into the unicode string line_value.
+def _MatchingSemanticTrigger( line_value, start_codepoint, column_codepoint,
+                              trigger_list ):
+  if start_codepoint < 0 or column_codepoint < 0:
+    return None
+
   line_length = len( line_value )
-  if not line_length or start_column > line_length:
-    return False
+  if not line_length or start_codepoint > line_length:
+    return None
 
-  match = False
+  # Ignore characters after user's caret column
+  line_value = line_value[ : column_codepoint ]
+
   for trigger in trigger_list:
-    match = ( _StringTriggerMatches( trigger, line_value, start_column )
-        if isinstance( trigger, basestring ) else
-        _RegexTriggerMatches( trigger, line_value, start_column ) )
-    if match:
-      return True
-  return False
+    if _RegexTriggerMatches( trigger,
+                             line_value,
+                             start_codepoint,
+                             column_codepoint ):
+      return trigger
+  return None
+
+
+def _MatchesSemanticTrigger( line_value, start_codepoint, column_codepoint,
+                             trigger_list ):
+  return _MatchingSemanticTrigger( line_value,
+                                   start_codepoint,
+                                   column_codepoint,
+                                   trigger_list ) is not None
 
 
 def _PrepareTrigger( trigger ):
+  trigger = ToUnicode( trigger )
   if trigger.startswith( TRIGGER_REGEX_PREFIX ):
     return re.compile( trigger[ len( TRIGGER_REGEX_PREFIX ) : ], re.UNICODE )
   return re.compile( re.escape( trigger ), re.UNICODE )
 
 
-def _PathToCompletersFolder():
-  dir_of_current_script = os.path.dirname( os.path.abspath( __file__ ) )
-  return os.path.join( dir_of_current_script )
+def FilterAndSortCandidatesWrap( candidates, sort_property, query,
+                                 max_candidates ):
+  from ycm_core import FilterAndSortCandidates
 
-
-def PathToFiletypeCompleterPluginLoader( filetype ):
-  return os.path.join( _PathToCompletersFolder(), filetype, 'hook.py' )
-
-
-def FiletypeCompleterExistsForFiletype( filetype ):
-  return os.path.exists( PathToFiletypeCompleterPluginLoader( filetype ) )
+  # The c++ interface we use only understands the (*native*) 'str' type (i.e.
+  # not the 'str' type from python-future. If we pass it a 'unicode' or
+  # 'bytes' instance then various things blow up, such as converting to
+  # std::string. Therefore all strings passed into the c++ API must pass through
+  # ToCppStringCompatible (or more strictly all strings which the C++ code
+  # needs to use and convert. In this case, just the insertion text property)
+  # For efficiency, the conversion of the insertion text property is done in the
+  # C++ layer.
+  return FilterAndSortCandidates( candidates,
+                                  ToCppStringCompatible( sort_property ),
+                                  ToCppStringCompatible( query ),
+                                  max_candidates )
 
 
 TRIGGER_REGEX_PREFIX = 're!'
 
 DEFAULT_FILETYPE_TRIGGERS = {
-  'c' : ['->', '.'],
-  'objc' : ['->',
-            '.',
-            r're!\[[_a-zA-Z]+\w*\s',    # bracketed calls
-            r're!^\s*[^\W\d]\w*\s',     # bracketless calls
-            r're!\[.*\]\s',             # method composition
-           ],
-  'ocaml' : ['.', '#'],
-  'cpp,objcpp' : ['->', '.', '::'],
-  'perl' : ['->'],
-  'php' : ['->', '::'],
-  'cs,java,javascript,typescript,d,python,perl6,scala,vb,elixir,go' : ['.'],
-  'ruby,rust' : ['.', '::'],
-  'lua' : ['.', ':'],
-  'erlang' : [':'],
+  'c' : [ '->', '.' ],
+  'objc,objcpp' : [
+    '->',
+    '.',
+    r're!\[[_a-zA-Z]+\w*\s',    # bracketed calls
+    r're!^\s*[^\W\d]\w*\s',     # bracketless calls
+    r're!\[.*\]\s',             # method composition
+  ],
+  'ocaml' : [ '.', '#' ],
+  'cpp,cuda,objcpp' : [ '->', '.', '::' ],
+  'perl' : [ '->' ],
+  'php' : [ '->', '::' ],
+  ( 'cs,'
+    'd,'
+    'elixir,'
+    'go,'
+    'groovy,'
+    'java,'
+    'javascript,'
+    'julia,'
+    'perl6,'
+    'python,'
+    'scala,'
+    'typescript,'
+    'vb' ) : [ '.' ],
+  'ruby,rust' : [ '.', '::' ],
+  'lua' : [ '.', ':' ],
+  'erlang' : [ ':' ],
 }
 
 PREPARED_DEFAULT_FILETYPE_TRIGGERS = _FiletypeTriggerDictFromSpec(
     DEFAULT_FILETYPE_TRIGGERS )
 
 
-INCLUDE_REGEX = re.compile( '\s*#\s*(?:include|import)\s*("|<)' )
+def GetFileContents( request_data, filename ):
+  """Returns the contents of the absolute path |filename| as a unicode
+  string. If the file contents exist in |request_data| (i.e. it is open and
+  potentially modified/dirty in the user's editor), then it is returned,
+  otherwise the file is read from disk (assuming a UTF-8 encoding) and its
+  contents returned."""
+  file_data = request_data[ 'file_data' ]
+  if filename in file_data:
+    return ToUnicode( file_data[ filename ][ 'contents' ] )
+
+  try:
+    return ToUnicode( ReadFile( filename ) )
+  except IOError:
+    LOGGER.exception( 'Error reading file %s', filename )
+    return ''
 
 
-def AtIncludeStatementStart( line ):
-  match = INCLUDE_REGEX.match( line )
-  if not match:
-    return False
-  # Check if the whole string matches the regex
-  return match.end() == len( line )
-
-
-def GetIncludeStatementValue( line, check_closing = True ):
-  """Returns include statement value and boolean indicating whether
-     include statement is quoted.
-     If check_closing is True the string is scanned for statement closing
-     character (" or >) and substring between opening and closing characters is
-     returned. The whole string after opening character is returned otherwise"""
-  match = INCLUDE_REGEX.match( line )
-  include_value = None
-  quoted_include = False
-  if match:
-    quoted_include = ( match.group( 1 ) == '"' )
-    if not check_closing:
-      include_value = line[ match.end(): ]
-    else:
-      close_char = '"' if quoted_include else '>'
-      close_char_pos = line.find( close_char, match.end() )
-      if close_char_pos != -1:
-        include_value = line[ match.end() : close_char_pos ]
-  return include_value, quoted_include
+def GetFileLines( request_data, filename ):
+  """Like GetFileContents but return the contents as a list of lines. Avoid
+  splitting the lines if they have already been split for the current file."""
+  if filename == request_data[ 'filepath' ]:
+    return request_data[ 'lines' ]
+  return SplitLines( GetFileContents( request_data, filename ) )
